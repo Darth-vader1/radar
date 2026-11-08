@@ -38,7 +38,7 @@ ENV/
 dump.rdb
 
 # Celery
-celerybeat-schedule
+celerybeat-schedule*
 celerybeat.pid
 
 # Logs
