@@ -1,0 +1,115 @@
+# Local development stack (hot reload, source mounted, debug on).
+# For production use docker-compose.prod.yml instead.
+#
+# After the first start, create an administrator:
+#   docker compose run --rm -e RADAR_ADMIN_PASSWORD backend python -m app.cli create-admin --email you@example.com
+
+x-backend-env: &backend-env
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  DEBUG: ${DEBUG:-true}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radar_user}:${POSTGRES_PASSWORD:-radar_secure_pass}@postgres:5432/${POSTGRES_DB:-radar_db}
+  DATABASE_SYNC_URL: postgresql://${POSTGRES_USER:-radar_user}:${POSTGRES_PASSWORD:-radar_secure_pass}@postgres:5432/${POSTGRES_DB:-radar_db}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  SECRET_KEY: ${SECRET_KEY:-radar_dev_super_secret_key_32bytes_min_2026}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+x-backend-dev: &backend-dev
+  build:
+    context: .
+    dockerfile: infrastructure/docker/backend.Dockerfile
+  environment: *backend-env
+  volumes:
+    - ./backend/app:/app/app
+    - ./backend/workers:/app/workers
+    - ./backend/alembic:/app/alembic
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: radar_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radar_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-radar_db}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar_user} -d ${POSTGRES_DB:-radar_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: radar_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    <<: *backend-dev
+    container_name: radar_backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.cli seed &&
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"
+
+  celery_worker:
+    <<: *backend-dev
+    container_name: radar_worker
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
+    healthcheck:
+      disable: true
+
+  celery_beat:
+    <<: *backend-dev
+    container_name: radar_beat
+    restart: unless-stopped
+    command: celery -A workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    healthcheck:
+      disable: true
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/frontend.Dockerfile
+      target: dev
+    container_name: radar_frontend
+    restart: unless-stopped
+    environment:
+      - BACKEND_INTERNAL_URL=http://backend:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:

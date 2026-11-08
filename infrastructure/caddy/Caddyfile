@@ -1,0 +1,37 @@
+# Public entry point. Caddy obtains and renews TLS certificates automatically.
+#   SITE_ADDRESS  your domain (e.g. radar.example.com)
+#   TLS_MODE      your e-mail for Let's Encrypt, or "internal" for a self-signed test cert
+
+{$SITE_ADDRESS} {
+	tls {$TLS_MODE}
+
+	encode zstd gzip
+
+	# Interactive API docs are only served when DEBUG is on; never expose them publicly.
+	# (Inside a handle block: a bare `respond` would run after the catch-all handle below.)
+	@docs path /docs* /redoc* /openapi.json
+	handle @docs {
+		respond 404
+	}
+
+	# API traffic goes straight to FastAPI. Caddy overwrites any client-supplied
+	# X-Forwarded-For, so the API's per-IP rate limits see the real client address.
+	@api path /api/*
+	handle @api {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /private/
+Disallow: /api/internal/
+Allow: /api/public/
+Allow: /jobs/
+Allow: /businesses/
+
+User-agent: RadarBot
+Disallow: /restricted-for-radar/
+Allow: /

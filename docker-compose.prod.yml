@@ -1,0 +1,182 @@
+# Production stack.
+#
+#   cp .env.production.example .env.production   # fill in real secrets
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#   docker compose -f docker-compose.prod.yml --env-file .env.production run --rm \
+#       -e RADAR_ADMIN_PASSWORD backend python -m app.cli create-admin --email you@example.com
+#
+# Only the Caddy proxy is published. PostgreSQL, Redis, the API and the Next.js server are
+# reachable on the internal network only. Migrations + seeding run once in the `migrate`
+# job before the API and workers start (never inside the API's start command).
+
+name: radar
+
+x-backend-env: &backend-env
+  ENVIRONMENT: production
+  DEBUG: "false"
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY (python -c "import secrets; print(secrets.token_urlsafe(48))")}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-radar}
+  DATABASE_SYNC_URL: postgresql://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-radar}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/0
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/2
+  BACKEND_CORS_ORIGINS: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN, e.g. https://radar.example.com}
+  # Only the proxy can reach the API, and Caddy replaces client-supplied X-Forwarded-For.
+  TRUST_PROXY_HEADERS: "true"
+  ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+  HTTP_USER_AGENT: ${HTTP_USER_AGENT:-RadarBot/1.0}
+  GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
+  KAGGLE_USERNAME: ${KAGGLE_USERNAME:-}
+  KAGGLE_KEY: ${KAGGLE_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+x-backend-image: &backend-image
+  image: radar-backend:${IMAGE_TAG:-latest}
+  build:
+    context: .
+    dockerfile: infrastructure/docker/backend.Dockerfile
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-radar}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 512m }
+    logging: *logging
+
+  # One-off: apply migrations and seed reference data, then exit.
+  migrate:
+    <<: *backend-image
+    restart: "no"
+    environment: *backend-env
+    command: ["sh", "-c", "alembic upgrade head && python -m app.cli seed"]
+    healthcheck: { disable: true }
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging: *logging
+
+  backend:
+    <<: *backend-image
+    restart: always
+    environment:
+      <<: *backend-env
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+
+  worker:
+    <<: *backend-image
+    restart: always
+    environment: *backend-env
+    command: ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=${WORKER_CONCURRENCY:-2}"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 60s
+      timeout: 20s
+      start_period: 30s
+      retries: 3
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+
+  # Exactly one beat instance: running two would start every scheduled run twice.
+  beat:
+    <<: *backend-image
+    restart: always
+    environment: *backend-env
+    command: ["celery", "-A", "workers.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    healthcheck: { disable: true }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: 1
+      resources:
+        limits: { memory: 256m }
+    logging: *logging
+
+  frontend:
+    image: radar-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: infrastructure/docker/frontend.Dockerfile
+      target: runner
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    restart: always
+    depends_on:
+      backend: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 512m }
+    logging: *logging
+
+  proxy:
+    image: caddy:2-alpine
+    restart: always
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS to your domain, e.g. radar.example.com}
+      TLS_MODE: ${TLS_MODE:?Set TLS_MODE to your ACME e-mail (Let's Encrypt), or 'internal' for a self-signed test cert}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend: { condition: service_healthy }
+      frontend: { condition: service_healthy }
+    logging: *logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
