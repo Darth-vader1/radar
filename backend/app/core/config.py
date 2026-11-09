@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     DEFAULT_REQUEST_TIMEOUT: float = 20.0
     MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024  # hard cap on any fetched body
 
+    # Observability
+    LOG_FORMAT: Optional[str] = None   # "json" | "text"; default: json in production, text otherwise
+    LOG_LEVEL: Optional[str] = None    # default: DEBUG when DEBUG=true, else INFO
+    METRICS_ENABLED: bool = True
+    METRICS_TOKEN: Optional[str] = None  # if set, GET /metrics requires "Authorization: Bearer <token>"
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    APP_RELEASE: Optional[str] = None  # e.g. git SHA; tagged on Sentry events and the metrics build info
+
     # Job execution
     PIPELINE_SOFT_TIME_LIMIT_SECONDS: int = 1500  # raises inside the task so it can record FAILED
     PIPELINE_TIME_LIMIT_SECONDS: int = 1800       # hard kill; the reaper cleans up after it

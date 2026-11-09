@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import bind_context, log_context
 from app.database.session import AsyncSessionLocal
 from app.models.source import (
     DeadLetterTask,
@@ -104,11 +105,13 @@ class PipelineOrchestrator:
         )
 
     async def execute_run(self, source_run_id: uuid.UUID) -> None:
-        try:
-            await self._execute_run(source_run_id)
-        finally:
-            # Release Redis connections held by robots/rate-limit services.
-            await self.gateway.close()
+        # Every log line emitted during this run (ours and libraries') carries the run id.
+        with log_context(run_id=source_run_id):
+            try:
+                await self._execute_run(source_run_id)
+            finally:
+                # Release Redis connections held by robots/rate-limit services.
+                await self.gateway.close()
 
     async def _execute_run(self, source_run_id: uuid.UUID) -> None:
         async with AsyncSessionLocal() as session:
@@ -126,6 +129,7 @@ class PipelineOrchestrator:
                 logger.error("Source %s not found for run %s", run.source_id, source_run_id)
                 return
 
+            bind_context(source=source.slug)  # scoped by the run's log_context
             adapter_cls = AdapterRegistry.get(source.adapter_key)
             if not adapter_cls:
                 err_msg = f"No adapter registered with key '{source.adapter_key}'"

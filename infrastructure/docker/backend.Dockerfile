@@ -16,7 +16,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/app \
-    WEB_CONCURRENCY=2
+    WEB_CONCURRENCY=2 \
+    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
 
 RUN groupadd --system radar && useradd --system --gid radar --home-dir /app --shell /usr/sbin/nologin radar
 
@@ -35,6 +36,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=4)" || exit 1
 
+# Metrics from all uvicorn worker processes are aggregated through PROMETHEUS_MULTIPROC_DIR,
+# which must start empty on every container start.
 # --proxy-headers: trust X-Forwarded-* from the reverse proxy in front (the API is not
 # published directly; only the proxy can reach it on the internal network).
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY} --proxy-headers --forwarded-allow-ips='*' --no-server-header"]
+CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY} --proxy-headers --forwarded-allow-ips='*' --no-server-header"]

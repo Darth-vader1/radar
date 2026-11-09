@@ -151,6 +151,18 @@ Phases are ordered by dependency. Each phase ends in something deployable and te
 5. Give the worker and beat full environment parity (beat currently lacks `DATABASE_URL`, which the scheduler from Phase 3 needs), and run exactly one beat instance.
 
 ### Phase 6: Observability (1–2 days). Fixes O1, O2
+
+> **Status: done (2026-11-08).**
+> - **Implemented**:
+>   - JSON logs with `request_id`, `run_id`, `source` and `task_id`, plus an access log, in `app/core/logging.py`.
+>   - Prometheus `/metrics`: multiprocess HTTP metrics plus database- and broker-derived pipeline and queue metrics, in `app/core/metrics.py`.
+>   - Opt-in, scrubbed Sentry in `app/core/observability.py`.
+>   - Redis worker heartbeats in `app/core/heartbeat.py`.
+>   - A readiness check that covers the broker and worker count and returns no error text.
+> - **Tests**: `tests/unit/test_logging.py` and `tests/integration/test_observability.py`.
+> - **Verified by hand**: in the production stack, every log line is JSON (the Celery banners are silenced with `--quiet`), a request ID set at the proxy appears in the API access log, the worker shows the run's `run_id` and `source`, `/metrics` is internal only, and readiness reports 1 live worker.
+> - **Bug fixed**: the backend image's `PROMETHEUS_MULTIPROC_DIR` was not set, which crash-looped the API. The test stack caught it.
+> - **Deferred**: frontend Sentry (`@sentry/nextjs`) is left out for now. It needs extra build configuration and CSP `connect-src` changes. Frontend failures still show up as API errors in Sentry and as 5xx in metrics.
 1. Structured JSON logging (`structlog` or a `python-json-logger` formatter) with a request ID middleware, plus `run_id` and `source` bound in pipeline and worker logs.
 2. Prometheus metrics: HTTP latency and status (`prometheus-fastapi-instrumentator`); custom counters for runs by status, fetches by domain and outcome, records created/deduped, and DLQ size; Celery queue depth (via `celery-exporter`).
 3. Sentry (backend + frontend) with environment tagging.

@@ -30,6 +30,12 @@ x-backend-env: &backend-env
   KAGGLE_KEY: ${KAGGLE_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  # Observability
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  APP_RELEASE: ${APP_RELEASE:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
 
 x-backend-image: &backend-image
   image: radar-backend:${IMAGE_TAG:-latest}
@@ -110,7 +116,7 @@ services:
     <<: *backend-image
     restart: always
     environment: *backend-env
-    command: ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=${WORKER_CONCURRENCY:-2}"]
+    command: ["celery", "--quiet", "-A", "workers.celery_app", "worker", "--loglevel=info", "--concurrency=${WORKER_CONCURRENCY:-2}"]
     healthcheck:
       test: ["CMD-SHELL", "celery -A workers.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
       interval: 60s
@@ -130,7 +136,7 @@ services:
     <<: *backend-image
     restart: always
     environment: *backend-env
-    command: ["celery", "-A", "workers.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    command: ["celery", "--quiet", "-A", "workers.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
     healthcheck: { disable: true }
     depends_on:
       migrate: { condition: service_completed_successfully }
