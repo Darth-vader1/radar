@@ -1,15 +1,14 @@
-from datetime import datetime, timezone
 import json
 import logging
 import os
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, List, Tuple
 
 from app.modules.businesses.adapters.osm_overpass import NormalizedBusiness
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
     DiscoverySeed,
     ExtractedItem,
-    RateLimitPolicy,
     RawFetchArtifact,
     SourceAdapter,
     ValidationOutcome,

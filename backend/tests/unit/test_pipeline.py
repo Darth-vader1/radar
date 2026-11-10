@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
 import hashlib
 import json
-import pytest
+from datetime import datetime, timezone
+
 from pydantic import BaseModel
+
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
     DiscoverySeed,
     ExtractedItem,
     RateLimitPolicy,
-    RawFetchArtifact,
     SourceAdapter,
     ValidationOutcome,
 )

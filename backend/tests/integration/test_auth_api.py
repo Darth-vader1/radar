@@ -6,7 +6,6 @@ and API key scopes.
 """
 import uuid
 
-import httpx
 import pytest
 from sqlalchemy import select
 

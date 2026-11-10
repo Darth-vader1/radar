@@ -23,6 +23,7 @@ import {
   Flame,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { useLatest } from "@/lib/use-latest";
 import { formatDate } from "@/lib/utils";
 
 interface BusinessItem {
@@ -109,9 +110,11 @@ export default function BusinessesPage() {
     setRulesLoading(false);
   };
 
+  // Dropdown filters re-fetch immediately; text search re-fetches on Enter/submit.
+  const loadBusinessesRef = useLatest(loadBusinesses);
   useEffect(() => {
-    loadBusinesses();
-  }, [city, websiteStatus, minLeadScore]);
+    loadBusinessesRef.current();
+  }, [city, websiteStatus, minLeadScore, loadBusinessesRef]);
 
   const handleUpdateRulePoints = async (ruleKey: string, newPoints: number) => {
     const res = await fetchApi(`/businesses/scoring-rules/${ruleKey}`, {

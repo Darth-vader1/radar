@@ -1,6 +1,6 @@
-import os
 from typing import Annotated, List, Optional, Union
-from pydantic import AnyHttpUrl, field_validator, model_validator
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 

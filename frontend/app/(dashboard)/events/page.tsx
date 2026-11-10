@@ -23,6 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { useLatest } from "@/lib/use-latest";
 import { formatDate } from "@/lib/utils";
 
 interface EventCategoryItem {
@@ -124,9 +125,11 @@ export default function EventsPage() {
     setLoading(false);
   };
 
+  // Dropdown filters re-fetch immediately; text search re-fetches on Enter/submit.
+  const loadDataRef = useLatest(loadData);
   useEffect(() => {
-    loadData();
-  }, [category, deliveryMode, hasCashOnly, studentOnly]);
+    loadDataRef.current();
+  }, [category, deliveryMode, hasCashOnly, studentOnly, loadDataRef]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();

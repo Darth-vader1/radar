@@ -1,7 +1,8 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import logging
 from typing import Any, Dict, List, Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +10,7 @@ from app.models.business import Business, LeadScoringRule, WebsiteStatus
 
 logger = logging.getLogger("radar.businesses.lead_scorer")
 
-DEFAULT_SCORING_WEIGHTS = {
+DEFAULT_SCORING_WEIGHTS: Dict[str, Dict[str, Any]] = {
     "no_website_found": {"points": 30, "label": "No website found"},
     "website_broken": {"points": 25, "label": "Website unreachable or broken"},
     "no_online_ordering": {"points": 20, "label": "No online ordering system detected"},
@@ -45,10 +46,10 @@ class LeadScoringEngine:
         db: Optional[AsyncSession] = None,
     ) -> LeadScoreResult:
         # 1. Load active rule weights from DB if available, else use defaults
-        rules_map = {}
+        rules_map: Dict[str, Dict[str, Any]] = {}
         if db is not None:
             try:
-                db_rules = await db.scalars(select(LeadScoringRule).where(LeadScoringRule.is_enabled == True))
+                db_rules = await db.scalars(select(LeadScoringRule).where(LeadScoringRule.is_enabled.is_(True)))
                 for r in db_rules:
                     rules_map[r.rule_key] = {"points": r.points, "label": r.label}
             except Exception as e:

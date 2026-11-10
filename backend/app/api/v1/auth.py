@@ -1,7 +1,6 @@
-import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Literal, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select, update
@@ -96,19 +95,20 @@ async def register(payload: UserCreate, request: Request, db: AsyncSession = Dep
 # --- Session helpers ---
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    common = dict(httponly=True, secure=settings.cookie_secure, samesite=settings.COOKIE_SAMESITE)
+    secure = settings.cookie_secure
+    samesite = cast(Literal["lax", "strict", "none"], settings.COOKIE_SAMESITE.lower())
     response.set_cookie(
         settings.ACCESS_COOKIE_NAME, access_token,
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/", **common,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/", httponly=True, secure=secure, samesite=samesite,
     )
     # Scoped to the auth routes so it is never sent with ordinary API calls.
     response.set_cookie(
         settings.REFRESH_COOKIE_NAME, refresh_token,
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400, path=f"{settings.API_V1_PREFIX}/auth", **common,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400, path=f"{settings.API_V1_PREFIX}/auth", httponly=True, secure=secure, samesite=samesite,
     )
     response.set_cookie(
         settings.SESSION_HINT_COOKIE_NAME, "1",
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400, path="/", **common,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400, path="/", httponly=True, secure=secure, samesite=samesite,
     )
 
 

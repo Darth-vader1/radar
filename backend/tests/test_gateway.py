@@ -9,8 +9,8 @@ import httpx
 import pytest
 
 from app.core.security import SSRFValidationError, check_resolved_ip, validate_url_shape
-from app.modules.scraping.adapter_base import DiscoverySeed, RateLimitPolicy
 from app.modules.scraping import gateway as gateway_module
+from app.modules.scraping.adapter_base import DiscoverySeed, RateLimitPolicy
 from app.modules.scraping.gateway import (
     FetcherGateway,
     FetchError,

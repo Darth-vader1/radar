@@ -29,7 +29,9 @@ SCHEDULED_TRIGGER = "SCHEDULED"
 
 
 def is_valid_cron(expr: Optional[str]) -> bool:
-    return bool(expr) and croniter.is_valid(expr)
+    if not expr:
+        return False
+    return bool(croniter.is_valid(expr))
 
 
 def is_due(cron_expr: str, last_scheduled_at: Optional[datetime], now: datetime) -> bool:

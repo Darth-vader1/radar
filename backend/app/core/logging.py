@@ -13,7 +13,9 @@ import json
 import logging
 import sys
 import traceback
+from collections.abc import Mapping
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import Any, Iterator
 
 from app.core.config import settings
@@ -21,7 +23,10 @@ from app.core.config import settings
 # Keys that may be bound to the logging context. Kept explicit so log schemas stay stable.
 CONTEXT_KEYS = ("request_id", "run_id", "source", "task_id", "task_name", "user_id")
 
-_context: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar("radar_log_context", default={})
+# Immutable default: the context is only ever replaced with a new dict, never mutated in place.
+_context: contextvars.ContextVar[Mapping[str, Any]] = contextvars.ContextVar(
+    "radar_log_context", default=MappingProxyType({})
+)
 
 
 def bind_context(**values: Any) -> contextvars.Token:

@@ -6,12 +6,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
+import bcrypt
 import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
-
-import bcrypt
 
 
 class SSRFValidationError(Exception):
@@ -194,7 +192,7 @@ def validate_outbound_url(url: str, allowed_ports: Optional[List[int]] = None) -
     except socket.gaierror as e:
         raise SSRFValidationError(f"Could not resolve host '{hostname}': {e}")
 
-    for family, socktype, proto, canonname, sockaddr in addr_infos:
-        check_resolved_ip(hostname, sockaddr[0])
+    for *_, sockaddr in addr_infos:
+        check_resolved_ip(hostname, str(sockaddr[0]))
 
     return url

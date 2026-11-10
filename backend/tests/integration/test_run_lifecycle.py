@@ -12,12 +12,13 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
+from test_auth_api import CSRF, make_admin, register_and_login
+from test_pipeline_e2e import SOURCES, _fixture_for
 
 from app.core.config import settings
 from app.models.event import Event
 from app.models.job import Job
 from app.models.source import DeadLetterTask, ExtractedRecord, RunStatus, Source, SourceRun
-from app.modules.adapters_loader import load_adapters
 from app.modules.jobs.services.job_service import JobIngestionService
 from app.modules.scraping import pipeline as pipeline_module
 from app.modules.scraping import runs as runs_module
@@ -30,8 +31,6 @@ from app.modules.scraping.scheduling import (
     reap_stale_runs,
     refresh_event_statuses,
 )
-from test_auth_api import CSRF, make_admin, register_and_login
-from test_pipeline_e2e import SOURCES, _fixture_for
 
 pytestmark = pytest.mark.integration
 
@@ -40,13 +39,6 @@ UTC = timezone.utc
 
 
 # --- fixtures & helpers -------------------------------------------------------
-
-@pytest.fixture
-def db(db_sessionmaker, monkeypatch):
-    load_adapters()
-    monkeypatch.setattr(pipeline_module, "AsyncSessionLocal", db_sessionmaker)
-    return db_sessionmaker
-
 
 @pytest.fixture
 def queue(monkeypatch):
@@ -362,7 +354,9 @@ async def test_concurrent_runs_of_two_sources_do_not_duplicate_entities(db):
 # --- scheduler ----------------------------------------------------------------
 
 def test_is_due():
-    t = lambda h, m, s=0: datetime(2026, 11, 8, h, m, s, tzinfo=UTC)
+    def t(h, m, s=0):
+        return datetime(2026, 11, 8, h, m, s, tzinfo=UTC)
+
     assert is_due("0 * * * *", None, t(10, 0, 30)) is True       # slot just passed
     assert is_due("0 * * * *", None, t(10, 5)) is False          # never scheduled: wait for next slot
     assert is_due("0 * * * *", t(10, 0, 5), t(10, 59)) is False  # already ran this hour
@@ -382,8 +376,12 @@ async def test_scheduler_starts_due_sources_once(db, queue):
     assert await dispatch_due_sources(sessionmaker=db, now=now + timedelta(minutes=1)) == []
 
     await set_status(db, run.id, RunStatus.COMPLETED.value)
-    assert await dispatch_due_sources(sessionmaker=db, now=now) == []  # same slot already served
-    assert len(await dispatch_due_sources(sessionmaker=db, now=now + timedelta(minutes=2))) == 1
+    # The scheduler measures from the last scheduled run's created_at. Derive the times from
+    # it (not the wall clock) so the test can't straddle a minute boundary.
+    served_at = run.created_at
+    end_of_same_minute = served_at.replace(second=59, microsecond=0)
+    assert await dispatch_due_sources(sessionmaker=db, now=end_of_same_minute) == []  # slot already served
+    assert len(await dispatch_due_sources(sessionmaker=db, now=served_at + timedelta(minutes=2))) == 1
 
 
 async def test_scheduler_skips_disabled_unconfigured_and_invalid_sources(db, queue):

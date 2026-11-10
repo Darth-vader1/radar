@@ -1,13 +1,11 @@
-from dataclasses import dataclass
 import logging
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
 
 from app.core.http import get_limited, safe_async_client
-
-from app.core.config import settings
 from app.core.security import SSRFValidationError, validate_outbound_url
 from app.models.business import WebsiteStatus
 

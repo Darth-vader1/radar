@@ -19,6 +19,7 @@ import {
   Building,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { useLatest } from "@/lib/use-latest";
 import { formatDate } from "@/lib/utils";
 
 interface JobSkillItem {
@@ -102,9 +103,11 @@ export default function JobsPage() {
     setLoading(false);
   };
 
+  // Dropdown filters re-fetch immediately; text search re-fetches on Enter/submit.
+  const loadJobsRef = useLatest(loadJobs);
   useEffect(() => {
-    loadJobs();
-  }, [category, remoteStatus, employmentType, experienceLevel]);
+    loadJobsRef.current();
+  }, [category, remoteStatus, employmentType, experienceLevel, loadJobsRef]);
 
   const handleSelectJob = async (jobId: string) => {
     setDetailLoading(true);

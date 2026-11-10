@@ -11,7 +11,8 @@ Two kinds:
 import logging
 import os
 import time
-from typing import Iterable, Optional
+from collections.abc import Mapping
+from typing import Any, Iterable, Optional
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -47,10 +48,27 @@ HTTP_LATENCY = Histogram(
 FINISHED_STATUSES = ("COMPLETED", "PARTIAL_FAILURE", "FAILED", "CANCELLED")
 
 
-def route_label(scope: dict) -> str:
-    """Route template (e.g. /api/v1/tasks/runs/{run_id}) so labels stay low-cardinality."""
+def route_label(scope: Mapping[str, Any]) -> str:
+    """
+    Full route template (e.g. /api/v1/tasks/runs/{run_id}) so labels stay low-cardinality.
+
+    FastAPI >= 0.116 reports the matched route's path relative to its own router
+    (/tasks/runs/{run_id}), without the prefixes of the routers it is included in. The
+    static prefix is recovered by rendering the route with this request's path params and
+    taking what precedes it in the real path; actual parameter values never reach a label.
+    """
     route = scope.get("route")
-    return getattr(route, "path", None) or "unmatched"
+    template = getattr(route, "path", None)
+    if not template:
+        return "unmatched"
+    path = scope.get("path", "")
+    try:
+        rendered = getattr(route, "path_format", template).format(**(scope.get("path_params") or {}))
+    except (KeyError, IndexError, ValueError):
+        return template
+    if rendered and path.endswith(rendered):
+        return path[: len(path) - len(rendered)] + template
+    return template
 
 
 def observe_request(method: str, route: str, status: int, seconds: float) -> None:
@@ -77,7 +95,7 @@ async def _pipeline_families() -> list:
     up = GaugeMetricFamily("radar_metrics_db_up", "1 if pipeline metrics could be read from PostgreSQL.")
     try:
         async with AsyncSessionLocal() as db:
-            slugs = dict((await db.execute(select(Source.id, Source.slug))).all())
+            slugs: dict[Any, str] = {row[0]: row[1] for row in (await db.execute(select(Source.id, Source.slug))).all()}
 
             finished = CounterMetricFamily(
                 "radar_runs_finished", "Source runs that reached a final status.", labels=["source", "status"]
@@ -133,8 +151,9 @@ async def _pipeline_families() -> list:
 
 
 async def _queue_families() -> list:
-    from app.core.heartbeat import count_live_workers
     import redis.asyncio as aioredis
+
+    from app.core.heartbeat import count_live_workers
 
     queue = GaugeMetricFamily("radar_celery_queue_length", "Tasks waiting in the Celery queue.", labels=["queue"])
     workers = GaugeMetricFamily("radar_workers_alive", "Celery workers with a fresh heartbeat.")
@@ -182,8 +201,9 @@ def check_metrics_token(authorization: Optional[str]) -> bool:
         return True
     import secrets
 
-    expected = f"Bearer {settings.METRICS_TOKEN}"
-    return bool(authorization) and secrets.compare_digest(authorization, expected)
+    if not authorization:
+        return False
+    return secrets.compare_digest(authorization, f"Bearer {settings.METRICS_TOKEN}")
 
 
 def monotonic() -> float:

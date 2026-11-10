@@ -1,20 +1,18 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
+
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
-    Index,
-    Integer,
     Numeric,
     SmallInteger,
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, TimestampMixin, UUIDMixin

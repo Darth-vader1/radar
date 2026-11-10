@@ -1,5 +1,6 @@
 import logging
 from typing import Dict, List, Optional, Type
+
 from app.modules.scraping.adapter_base import SourceAdapter
 
 logger = logging.getLogger("radar.scraping.registry")

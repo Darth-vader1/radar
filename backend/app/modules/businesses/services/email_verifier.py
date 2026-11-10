@@ -1,6 +1,7 @@
-from dataclasses import dataclass, field
 import logging
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List
+
 import dns.resolver
 from email_validator import EmailNotValidError, validate_email
 

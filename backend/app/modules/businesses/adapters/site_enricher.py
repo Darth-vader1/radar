@@ -1,15 +1,12 @@
-from dataclasses import dataclass, field
 import logging
 import re
-from typing import List, Optional, Set
+from dataclasses import dataclass, field
+from typing import List, Set
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
-import httpx
 
 from app.core.http import get_limited, safe_async_client
-
-from app.core.config import settings
 from app.core.security import SSRFValidationError, validate_outbound_url
 
 logger = logging.getLogger("radar.businesses.site_enricher")
@@ -68,9 +65,10 @@ class BusinessSiteEnricher:
                     # Look for contact / about page link
                     soup = BeautifulSoup(resp.text, "lxml")
                     for a in soup.find_all("a", href=True):
-                        href = a["href"].lower()
+                        raw_href = str(a.get("href", ""))
+                        href = raw_href.lower()
                         if any(kw in href for kw in ("contact", "about", "get-in-touch")):
-                            contact_url = urljoin(resp.url, a["href"])
+                            contact_url = urljoin(resp.url, raw_href)
                             if contact_url not in pages_to_visit and len(pages_to_visit) < 3:
                                 pages_to_visit.append(contact_url)
             except Exception as e:
@@ -95,7 +93,7 @@ class BusinessSiteEnricher:
 
         # 1. mailto: links and raw emails
         for a in soup.find_all("a", href=True):
-            href = a["href"]
+            href = str(a.get("href", ""))
             if href.startswith("mailto:"):
                 clean = href.replace("mailto:", "").split("?")[0].strip().lower()
                 if clean:

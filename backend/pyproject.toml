@@ -1,0 +1,35 @@
+# Tooling configuration for the backend. Dependencies live in requirements*.txt / *.lock.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["venv", "alembic/versions"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes (undefined names, unused imports/variables),
+# I: import sorting, B: bugbear (likely bugs: mutable defaults, loop-variable capture, ...)
+select = ["E", "W", "F", "I", "B"]
+ignore = [
+    "E501",  # long lines: handled by judgement, not enforced
+    "B008",  # FastAPI's Depends()/Query() in argument defaults is the intended pattern
+    "B904",  # `raise ... from` inside except: nice-to-have, too noisy to enforce now
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]  # assert False is fine in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "workers"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app", "workers"]
+mypy_path = "."
+explicit_package_bases = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+# Gradual typing: untyped functions are not body-checked yet. Tighten over time.
+check_untyped_defs = false

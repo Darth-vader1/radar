@@ -1,4 +1,5 @@
 import pytest
+
 from app.core.security import SSRFValidationError, validate_outbound_url
 
 

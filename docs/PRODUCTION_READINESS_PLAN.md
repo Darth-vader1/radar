@@ -169,6 +169,26 @@ Phases are ordered by dependency. Each phase ends in something deployable and te
 4. Make readiness check the Celery broker too, and add a worker heartbeat check. Don't echo raw exception strings in `/health/ready`.
 
 ### Phase 7: CI/CD and quality gates (1–2 days). Fixes O6
+
+> **Status: done locally (2026-11-10). CI runs once pushed.**
+> - **Implemented**:
+>   - CI in `.github/workflows/ci.yml`: backend, frontend, dependency-audit and images jobs.
+>   - Image publishing to GHCR on version tags in `release.yml`, plus Dependabot.
+>   - Ruff and mypy configuration in `backend/pyproject.toml`; ESLint and `tsc` for the frontend.
+>   - `uv` universal lockfiles, and `scripts/check.py` to run the same checks locally.
+>   - `docs/DEVELOPMENT.md`.
+> - **Security fixes found by the new audits**:
+>   - Starlette 0.46 → 1.10 (FastAPI 0.115 → 0.162), which fixes 14 advisories.
+>   - Next.js 14.2 → 15.5.29 and React 18 → 19, which fixes critical RCE/SSRF advisories. The bundled PostCSS is pinned to a patched version through npm overrides.
+> - **Other fixes**:
+>   - The Overpass POST body is sent with `content=` (`data=` with a string is deprecated in httpx).
+>   - The abstract `discover()` is typed correctly.
+>   - The `event_categories` model was aligned with its migration.
+>   - A flaky scheduler test was fixed.
+>   - HTTP metric labels now keep the router prefix under the new FastAPI.
+>   - `useEffect` stale-closure warnings were fixed without changing behaviour.
+>   - Unused `framer-motion` and `recharts` were removed.
+> - **Known exception**: a moderate `minimatch` advisory in the dev-only ESLint toolchain, which clears with the Next.js 16 and ESLint 9 upgrade.
 1. GitHub Actions workflow:
    - backend: ruff, mypy, pytest (unit + integration with Postgres/Redis service containers), and `alembic upgrade head` → `alembic check` for model drift
    - frontend: lint, typecheck, `next build`

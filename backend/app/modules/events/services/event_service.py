@@ -1,22 +1,18 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Optional, Tuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.database.locks import advisory_xact_lock
 
+from app.database.locks import advisory_xact_lock
 from app.models.event import (
-    DeliveryMode,
     Event,
     EventCategory,
     EventCategoryLink,
     EventCategoryLinkOrigin,
-    EventStatus,
-    EventType,
 )
 from app.modules.events.services.event_classifier import (
     classify_event_categories,
@@ -86,7 +82,6 @@ class EventIngestionService:
 
         # 3. Check for existing event (Deduplication)
         # Check by registration_url or (normalized_name + organizer)
-        reg_domain = urlparse(event_data.registration_url).netloc.lower()
         stmt = select(Event).options(selectinload(Event.categories)).where(
             or_(
                 Event.registration_url == event_data.registration_url,
@@ -164,4 +159,5 @@ class EventIngestionService:
         # Re-fetch with categories loaded
         stmt_refresh = select(Event).options(selectinload(Event.categories)).where(Event.id == new_event.id)
         saved = await self.db.scalar(stmt_refresh)
+        assert saved is not None  # committed in this transaction
         return saved, True

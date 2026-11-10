@@ -1,13 +1,12 @@
-import asyncio
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from app.core.config import settings
-from app.core.http import ResponseTooLargeError, Resolver, read_limited, safe_async_client
+from app.core.http import Resolver, ResponseTooLargeError, read_limited, safe_async_client
 from app.core.security import SSRFValidationError, validate_outbound_url
 from app.modules.scraping.adapter_base import DiscoverySeed, RateLimitPolicy, RawFetchArtifact
 from app.modules.scraping.politeness import RobotsPolicyService, TokenBucketRateLimiter
@@ -202,7 +201,7 @@ class FetcherGateway:
                         params=params if hops == 0 else None,
                         headers=headers,
                         json=body if (isinstance(body, dict) and hops == 0) else None,
-                        data=body if (isinstance(body, str) and hops == 0) else None,
+                        content=body if (isinstance(body, str) and hops == 0) else None,
                     ) as resp:
                         # Check if this is a redirect
                         if resp.is_redirect:

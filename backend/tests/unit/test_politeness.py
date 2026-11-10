@@ -1,7 +1,9 @@
 import asyncio
-import pytest
+
 import protego
-from app.modules.scraping.politeness import RobotsPolicyService, TokenBucketRateLimiter
+import pytest
+
+from app.modules.scraping.politeness import TokenBucketRateLimiter
 
 
 @pytest.mark.asyncio

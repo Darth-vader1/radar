@@ -1,19 +1,19 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
+
 from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
     Index,
-    Integer,
     Numeric,
-    SmallInteger,
     String,
     Text,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, TimestampMixin, UUIDMixin
@@ -113,8 +113,10 @@ class Event(Base, UUIDMixin, TimestampMixin):
 
 class EventCategory(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "event_categories"
+    __table_args__ = (UniqueConstraint("slug", name="event_categories_slug_key"),)
 
-    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    # Matches migration 004: a unique constraint plus a plain index (the seed relies on ON CONFLICT (slug)).
+    slug: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

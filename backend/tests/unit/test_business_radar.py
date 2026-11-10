@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+
 import pytest
+
 from app.models.business import Business, WebsiteStatus
-from app.modules.businesses.adapters.osm_overpass import NormalizedBusiness, OpenStreetMapOverpassAdapter
+from app.modules.businesses.adapters.osm_overpass import OpenStreetMapOverpassAdapter
 from app.modules.businesses.services.email_verifier import EmailVerifierService, VerificationStatus
 from app.modules.businesses.services.lead_scorer import LeadScoringEngine
 from app.modules.businesses.services.website_checker import WebsiteCheckerService

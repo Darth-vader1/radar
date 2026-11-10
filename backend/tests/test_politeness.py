@@ -1,8 +1,7 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from app.core.security import SSRFValidationError
 from app.modules.scraping.politeness import RobotsPolicyService, TokenBucketRateLimiter
 
 
@@ -146,12 +145,13 @@ Crawl-delay: 2.5
                 assert await service.is_allowed("https://notfound.com/anything") is True
 
     async def test_ssrf_blocked_on_robots_fetch(self):
+        """robots.txt for an internal host is never requested; the gateway's own SSRF
+        check is what rejects the page fetch itself."""
         service = RobotsPolicyService()
-        # Fetching robots for loopback should raise SSRFValidationError or fallback permissively
-        with pytest.raises(SSRFValidationError):
-            # Calling validate_outbound_url directly on local IP
-            from app.core.security import validate_outbound_url
-            validate_outbound_url("http://127.0.0.1/robots.txt")
+        with patch.object(service, "get_redis", side_effect=Exception("No redis")):
+            with patch("app.modules.scraping.politeness.get_limited", new_callable=AsyncMock) as mock_get:
+                await service.is_allowed("http://127.0.0.1/admin")
+                mock_get.assert_not_called()
 
     async def test_close_cleans_up(self):
         service = RobotsPolicyService()

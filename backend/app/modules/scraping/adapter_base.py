@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, AsyncIterator, Generic, List, Optional, Tuple, TypeVar
+from typing import Any, AsyncIterator, Generic, Optional, Tuple, TypeVar
+
 from pydantic import BaseModel
 
 NormalizedT = TypeVar("NormalizedT", bound=BaseModel)
@@ -86,8 +87,8 @@ class SourceAdapter(ABC, Generic[NormalizedT]):
         return (len(missing) == 0, missing)
 
     @abstractmethod
-    async def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
-        """Yields initial API requests, feed URLs, or paginated listing URLs within crawl budget."""
+    def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
+        """Implemented as an async generator (`async def ... yield`). Yields initial API requests, feed URLs, or paginated listing URLs within crawl budget."""
         pass
 
     @abstractmethod

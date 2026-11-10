@@ -2,13 +2,12 @@ import asyncio
 import logging
 from typing import Optional
 from urllib.parse import urlparse
+
 import protego
 import redis.asyncio as aioredis
-import httpx
-
-from app.core.http import get_limited, safe_async_client
 
 from app.core.config import settings
+from app.core.http import get_limited, safe_async_client
 from app.core.security import validate_outbound_url
 
 logger = logging.getLogger("radar.scraping.politeness")
@@ -135,7 +134,7 @@ class RobotsPolicyService:
             r = await self.get_redis()
             cached = await r.get(cache_key)
             if cached is not None:
-                raw_robots_txt = cached
+                raw_robots_txt = cached if isinstance(cached, str) else cached.decode("utf-8", "replace")
         except Exception as e:
             logger.debug("Redis robots cache read error: %s", e)
 

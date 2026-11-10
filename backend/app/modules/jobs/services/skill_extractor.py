@@ -1,5 +1,5 @@
 import re
-from typing import List, Set, Tuple
+from typing import List, Set
 
 from app.models.job import ExperienceLevel, JobCategory, RemoteStatus
 

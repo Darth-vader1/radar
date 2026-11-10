@@ -1,15 +1,15 @@
-from datetime import datetime, timezone
 import logging
 import re
-from typing import List, Optional, Tuple
-from urllib.parse import urlparse
 import uuid
+from datetime import datetime, timezone
+from typing import Tuple
+from urllib.parse import urlparse
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.database.locks import advisory_xact_lock
 
+from app.database.locks import advisory_xact_lock
 from app.models.job import Job, JobSkill
 from app.modules.jobs.services.skill_extractor import (
     classify_category,

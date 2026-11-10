@@ -8,6 +8,7 @@ import re
 import uuid
 
 import pytest
+from test_run_lifecycle import create_run, create_source, execute
 
 from app.core import heartbeat
 from app.core.config import settings
@@ -15,7 +16,6 @@ from app.core.logging import ContextFilter
 from app.core.observability import _before_send, init_sentry
 from app.database import session as session_module
 from app.models.source import RunStatus
-from test_run_lifecycle import create_run, create_source, db, execute  # noqa: F401  (db is a fixture)
 
 pytestmark = pytest.mark.integration
 

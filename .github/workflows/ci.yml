@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, types, migrations, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: radar
+          POSTGRES_PASSWORD: radar
+          POSTGRES_DB: radar
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U radar -d radar"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+asyncpg://radar:radar@localhost:5432/radar
+      DATABASE_SYNC_URL: postgresql://radar:radar@localhost:5432/radar
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+
+      - name: Install locked dependencies
+        run: pip install --no-deps -r requirements-dev.lock
+
+      - name: Lint (ruff)
+        run: ruff check --output-format=github .
+
+      - name: Type check (mypy)
+        run: mypy
+
+      - name: Migrations apply cleanly and match the models
+        run: |
+          alembic upgrade head
+          alembic check
+
+      - name: Tests (unit + integration against Postgres/Redis)
+        run: pytest -q
+
+  frontend:
+    name: Frontend (lint, types, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - name: Lint (ESLint)
+        run: npm run lint
+      - name: Type check (tsc)
+        run: npm run typecheck
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python (pip-audit on the production lockfile)
+        run: |
+          pip install pip-audit
+          pip-audit --requirement backend/requirements.lock --progress-spinner off
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Production dependencies only, failing on high/critical. Dev-only tooling advisories
+      # (e.g. in the ESLint toolchain) are reported by Dependabot instead of blocking merges.
+      - name: Node (npm audit, production dependencies)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+  images:
+    name: Docker images (build + scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Production compose file is valid
+        run: docker compose -f docker-compose.prod.yml config --quiet
+        env:
+          SECRET_KEY: ci-placeholder-secret-key-ci-placeholder-secret-key
+          POSTGRES_PASSWORD: ci
+          REDIS_PASSWORD: ci
+          PUBLIC_ORIGIN: https://radar.example.com
+          SITE_ADDRESS: radar.example.com
+          TLS_MODE: internal
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/backend.Dockerfile
+          tags: radar-backend:ci
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/frontend.Dockerfile
+          target: runner
+          tags: radar-frontend:ci
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Backend image imports and runs as non-root
+        run: |
+          docker run --rm radar-backend:ci python -c "import app.main, workers.tasks; print('ok')"
+          test "$(docker run --rm radar-backend:ci id -u)" != "0"
+          test "$(docker run --rm radar-frontend:ci id -u)" != "0"
+
+      # Fail on critical vulnerabilities that have a fix; list high ones without failing,
+      # since base-image OS advisories appear independently of our changes.
+      - name: Scan backend image (critical, fixable)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: radar-backend:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan frontend image (critical, fixable)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: radar-frontend:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Report high-severity findings (informational)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: radar-backend:ci
+          severity: HIGH
+          ignore-unfixed: true
+          exit-code: "0"

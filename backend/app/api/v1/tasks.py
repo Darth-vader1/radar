@@ -1,10 +1,12 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import desc, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,7 +18,6 @@ from app.models.source import (
     ScrapingTask,
     Source,
     SourceRun,
-    TaskStatus,
 )
 from app.modules.scraping.pipeline import RETRY_SEEDS_KEY
 from app.modules.scraping.runs import (
@@ -169,7 +170,7 @@ async def cancel_run(
             error_summary=f"Cancelled by user {current_user.email}",
         )
     )
-    if result.rowcount == 0:
+    if cast(CursorResult, result).rowcount == 0:
         await db.refresh(run)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot cancel run in status: {run.status}")
 

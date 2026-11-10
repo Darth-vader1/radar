@@ -1,7 +1,8 @@
 import re
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
-from app.models.event import DeliveryMode, EventStatus, EventType
+
+from app.models.event import EventStatus
 
 CATEGORY_KEYWORDS = {
     "ai": [

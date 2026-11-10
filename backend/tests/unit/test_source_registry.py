@@ -1,5 +1,7 @@
 from typing import Any, AsyncIterator, Tuple
+
 from pydantic import BaseModel
+
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
     DiscoverySeed,

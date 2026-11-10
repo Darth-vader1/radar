@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
 import json
 import logging
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
-from pydantic import BaseModel, Field
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, List, Optional, Tuple
+
+from pydantic import BaseModel
 
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
     DiscoverySeed,
     ExtractedItem,
-    RateLimitPolicy,
     RawFetchArtifact,
     SourceAdapter,
     ValidationOutcome,

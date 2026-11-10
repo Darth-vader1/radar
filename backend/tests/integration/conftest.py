@@ -45,8 +45,9 @@ def _recreate_database(sync_url) -> None:
 
 
 def _run_migrations(sync_url) -> None:
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
@@ -120,3 +121,14 @@ async def client(db_sessionmaker, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def db(db_sessionmaker, monkeypatch):
+    """Clean test database with adapters registered and the pipeline bound to it."""
+    from app.modules.adapters_loader import load_adapters
+    from app.modules.scraping import pipeline as pipeline_module
+
+    load_adapters()
+    monkeypatch.setattr(pipeline_module, "AsyncSessionLocal", db_sessionmaker)
+    return db_sessionmaker

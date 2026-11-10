@@ -7,7 +7,7 @@ correlation context (request_id, run_id, source, task) so a Sentry issue can be 
 to its log lines.
 """
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.core.config import settings
 
@@ -17,7 +17,7 @@ _SENSITIVE_HEADERS = {"authorization", "cookie", "x-api-key", "set-cookie", "pro
 _initialized = False
 
 
-def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> Optional[dict[str, Any]]:
+def _before_send(event: Any, hint: Any) -> Any:
     from app.core.logging import get_context
 
     tags = event.setdefault("tags", {})
@@ -42,9 +42,10 @@ def init_sentry(component: str) -> bool:
         return _initialized
 
     import sentry_sdk
+    from sentry_sdk.integrations import Integration
     from sentry_sdk.integrations.logging import LoggingIntegration
 
-    integrations = [LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)]
+    integrations: list[Integration] = [LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)]
     if component == "worker":
         from sentry_sdk.integrations.celery import CeleryIntegration
 

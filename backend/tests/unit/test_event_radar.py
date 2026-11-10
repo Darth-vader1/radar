@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
-import pytest
+
 from app.models.event import EventStatus
-from app.modules.events.adapters.devpost import DevpostHackathonsAdapter, NormalizedEvent
+from app.modules.events.adapters.devpost import DevpostHackathonsAdapter
 from app.modules.events.adapters.zindi import ZindiCompetitionsAdapter
 from app.modules.events.services.event_classifier import (
     classify_event_categories,

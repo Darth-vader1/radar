@@ -1,15 +1,14 @@
-import asyncio
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
 import traceback
-from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import CursorResult
 
 from app.core.logging import bind_context, log_context
 from app.database.session import AsyncSessionLocal
@@ -20,14 +19,12 @@ from app.models.source import (
     ScrapingTask,
     Source,
     SourceRun,
-    TaskStage,
     TaskStatus,
 )
 from app.modules.scraping.adapter_base import (
     DiscoverySeed,
     ExtractedItem,
     RateLimitPolicy,
-    RawFetchArtifact,
     SourceAdapter,
 )
 from app.modules.scraping.gateway import FetcherGateway, RobotsDisallowedError
@@ -343,7 +340,7 @@ class PipelineOrchestrator:
                         error_summary=error_summary,
                     )
                 )
-                if result.rowcount == 0:
+                if cast(CursorResult, result).rowcount == 0:
                     cancelled = True  # status changed underneath us; treat like a cancel
                     await session.execute(update(SourceRun).where(SourceRun.id == source_run_id).values(**counters))
             # Update source stats; only touch timestamps that this run actually advances,

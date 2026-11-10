@@ -1,23 +1,21 @@
-from datetime import datetime, timezone
 import logging
 import re
+import uuid
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 from urllib.parse import urlparse
-import uuid
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.database.locks import advisory_xact_lock
 
+from app.database.locks import advisory_xact_lock
 from app.models.business import (
     Business,
     BusinessContact,
     BusinessSocialProfile,
-    ContactType,
     EmailVerification,
     LeadScore,
-    SocialPlatform,
     VerificationStatus,
     WebsiteStatus,
 )
@@ -69,7 +67,6 @@ class BusinessIngestionService:
         Returns: (business, "CREATED" | "UPDATED" | "DEDUPLICATED")
         """
         norm_name = normalize_string(normalized.name)
-        norm_city = (normalized.city or "Lagos").strip().lower()
         norm_country = normalized.country.strip().lower()
 
         # Serialize concurrent ingestion of the same business (see advisory_xact_lock).

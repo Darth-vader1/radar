@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
 import json
 import logging
-import re
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, List, Tuple
 
 from app.modules.events.adapters.devpost import NormalizedEvent
 from app.modules.scraping.adapter_base import (

@@ -9,6 +9,7 @@ come from a real source.
 """
 import logging
 import os
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,8 +41,8 @@ def _status_for(required_env_vars: list[str]) -> str:
     return ConfigStatus.AWAITING_CONFIGURATION.value if missing else ConfigStatus.READY.value
 
 
-def default_sources() -> list[dict]:
-    sources = [
+def default_sources() -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = [
         dict(
             slug="osm_overpass_businesses", name="OpenStreetMap Overpass POI Directory", module_type="BUSINESS",
             source_category="open_map_api", base_url="https://overpass-api.de/api/interpreter",

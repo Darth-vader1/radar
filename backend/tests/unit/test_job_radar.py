@@ -1,7 +1,5 @@
-import uuid
-import pytest
 from app.models.job import JobCategory
-from app.modules.jobs.adapters.greenhouse import GreenhouseBoardsAdapter, NormalizedJob
+from app.modules.jobs.adapters.greenhouse import GreenhouseBoardsAdapter
 from app.modules.jobs.services.job_service import normalize_company, normalize_title
 from app.modules.jobs.services.skill_extractor import (
     classify_category,

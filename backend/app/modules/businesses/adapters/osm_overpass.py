@@ -1,15 +1,14 @@
-from datetime import datetime, timezone
 import json
 import logging
-import re
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+
 from pydantic import BaseModel, Field
 
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
     DiscoverySeed,
     ExtractedItem,
-    RateLimitPolicy,
     RawFetchArtifact,
     SourceAdapter,
     ValidationOutcome,
@@ -54,7 +53,6 @@ class OpenStreetMapOverpassAdapter(SourceAdapter[NormalizedBusiness]):
 
     async def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
         city_param = query_params.get("city", "Ikeja")
-        category_param = query_params.get("category", "Restaurants")
 
         # Overpass QL query: extract amenities, shops, and offices in target area
         bbox = "6.5700,3.3300,6.6200,3.3700"  # Default Ikeja

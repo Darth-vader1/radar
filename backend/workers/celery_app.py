@@ -2,12 +2,14 @@ from celery import Celery
 from celery.signals import (
     beat_init,
     celeryd_init,
-    setup_logging as celery_setup_logging,
     task_postrun,
     task_prerun,
     worker_process_init,
     worker_ready,
     worker_shutdown,
+)
+from celery.signals import (
+    setup_logging as celery_setup_logging,
 )
 
 from app.core.config import settings
