@@ -171,14 +171,14 @@ jobs:
       # Fail on critical vulnerabilities that have a fix; list high ones without failing,
       # since base-image OS advisories appear independently of our changes.
       - name: Scan backend image (critical, fixable)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: radar-backend:ci
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: "1"
       - name: Scan frontend image (critical, fixable)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: radar-frontend:ci
           severity: CRITICAL
@@ -186,7 +186,7 @@ jobs:
           exit-code: "1"
       - name: Report high-severity findings (informational)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: radar-backend:ci
           severity: HIGH
