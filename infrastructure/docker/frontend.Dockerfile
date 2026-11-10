@@ -3,7 +3,7 @@
 #   target "runner" -> minimal production server from `output: "standalone"` (docker-compose.prod.yml)
 
 # ---- dependencies (exact versions from package-lock.json) ----
-FROM node:20-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -26,7 +26,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- production runtime ----
-FROM node:20-alpine AS runner
+FROM node:26-alpine AS runner
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
