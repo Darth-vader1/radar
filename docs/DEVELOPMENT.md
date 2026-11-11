@@ -19,7 +19,33 @@ npm ci
 PostgreSQL and Redis come from Docker (`radar_postgres` on port 5433 and `radar_redis` on
 port 6379, as configured in `.env`).
 
-Run each of these in its own terminal:
+## Running everything (Windows)
+
+```bash
+scripts\dev.cmd        # start the whole stack (or double-click it)
+scripts\dev-stop.cmd   # stop it again (add -IncludeDatabase to also stop Postgres/Redis)
+```
+
+`dev.cmd` does the following:
+
+- Starts Docker Desktop and the database containers if they aren't running.
+- Applies pending migrations.
+- Opens titled windows for the API, Celery worker, Celery beat and frontend, then waits until they respond and opens the browser.
+
+Ports are chosen as follows:
+
+- The API uses port 8000, or the next free port if another program holds it.
+- The frontend uses port 3000 and is pointed at that API port automatically.
+
+Running it again is safe. Services that are already running are detected and left alone,
+which matters for beat: two copies would start every scheduled scrape twice.
+`dev-stop.cmd` only stops this project's processes. Other apps on the same ports are left alone.
+
+Options:
+- `scripts\dev.cmd -NoBrowser` does not open the browser.
+- `scripts\dev.cmd -SkipMigrations` does not run `alembic upgrade head`.
+
+To run the services by hand instead, use one terminal for each:
 
 | Process | Command (from `backend/` or `frontend/`) |
 |---|---|
