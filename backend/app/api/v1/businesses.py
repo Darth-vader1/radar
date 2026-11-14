@@ -1,18 +1,23 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db, require_roles
+from app.api.pagination import paginate
+from app.core.config import settings
+from app.core.rate_limit import enforce_rate_limit
 from app.models.auth import AuditLog, User
 from app.models.business import Business, LeadScoringRule
+from app.modules.businesses.services import google_lookup
 from app.modules.businesses.services.lead_scorer import LeadScoringEngine
 from app.schemas.business import (
     BusinessDrawerDetail,
     BusinessRead,
+    GoogleLiveDetails,
     LeadRuleUpdate,
     LeadScoringRuleRead,
 )
@@ -22,6 +27,7 @@ router = APIRouter(prefix="/businesses", tags=["BusinessRadar"])
 
 @router.get("", response_model=List[BusinessRead])
 async def list_businesses(
+    response: Response,
     country: Optional[str] = Query("Nigeria"),
     state: Optional[str] = Query(None),
     city: Optional[str] = Query(None),
@@ -71,9 +77,7 @@ async def list_businesses(
             | func.lower(Business.category).like(search_term)
         )
 
-    stmt = stmt.limit(limit).offset(offset)
-    results = await db.scalars(stmt)
-    return list(results.all())
+    return await paginate(db, stmt, limit, offset, response)
 
 
 @router.get("/categories", response_model=List[str])
@@ -154,6 +158,30 @@ async def get_business_detail(
     if not business:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found.")
     return business
+
+
+@router.get("/{business_id}/google", response_model=GoogleLiveDetails)
+async def google_live_details(
+    business_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(["super_admin", "admin", "researcher"])),
+):
+    """
+    Current Google Maps details for this business, fetched live and not stored. Each call is a
+    paid Google request, so it's limited per user. Only the Google place ID is remembered.
+    """
+    await enforce_rate_limit(f"google-lookup:{current_user.id}", settings.GOOGLE_LOOKUPS_PER_MINUTE, 60,
+                             detail="Too many Google lookups; wait a minute.")
+    business = await db.scalar(select(Business).where(Business.id == business_id))
+    if not business:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found.")
+    try:
+        details = await google_lookup.lookup(business)
+    except google_lookup.GoogleLookupError as exc:
+        await db.commit()  # keep a place ID found before the failure
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    await db.commit()  # persists only google_place_id, if it was just found
+    return GoogleLiveDetails(**details.__dict__)
 
 
 @router.post("/{business_id}/rescore", response_model=BusinessRead)

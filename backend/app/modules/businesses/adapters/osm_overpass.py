@@ -31,6 +31,10 @@ class NormalizedBusiness(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     raw_tags: Dict[str, Any] = Field(default_factory=dict)
+    # Set by the Google Places adapter; Google's terms allow storing place IDs indefinitely.
+    google_place_id: Optional[str] = None
+    # discovery_source recorded on contacts that come straight from this record
+    data_origin: str = "directory_seed"
 
 
 @register_adapter("osm_overpass")

@@ -23,9 +23,11 @@ import {
   Flame,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { Pagination, PAGE_SIZE } from "@/components/pagination";
 import { SaveButton } from "@/components/save-button";
 import { useLatest } from "@/lib/use-latest";
-import { isOsmRecord, OSM_COPYRIGHT_URL } from "@/lib/attribution";
+import { isGoogleRecord, isOsmRecord, OSM_COPYRIGHT_URL } from "@/lib/attribution";
+import { GoogleLookup } from "@/components/google-lookup";
 import { formatDate } from "@/lib/utils";
 
 interface BusinessItem {
@@ -84,9 +86,13 @@ export default function BusinessesPage() {
   const [scoringRules, setScoringRules] = useState<ScoringRule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(false);
 
-  const loadBusinesses = async () => {
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+
+  const loadBusinesses = async (at = 0) => {
     setLoading(true);
-    const queryParts = [];
+    setOffset(at);
+    const queryParts = [`limit=${PAGE_SIZE}`, `offset=${at}`];
     if (city) queryParts.push(`city=${encodeURIComponent(city)}`);
     if (category) queryParts.push(`category=${encodeURIComponent(category)}`);
     if (websiteStatus) queryParts.push(`website_status=${encodeURIComponent(websiteStatus)}`);
@@ -97,6 +103,7 @@ export default function BusinessesPage() {
     const res = await fetchApi<BusinessItem[]>(`/businesses${queryStr}`);
     if (res.data) {
       setBusinesses(res.data);
+      setTotal(res.total);
     }
     setLoading(false);
   };
@@ -113,7 +120,7 @@ export default function BusinessesPage() {
   // Dropdown filters re-fetch immediately; text search re-fetches on Enter/submit.
   const loadBusinessesRef = useLatest(loadBusinesses);
   useEffect(() => {
-    loadBusinessesRef.current();
+    loadBusinessesRef.current(0); // filters changed: back to the first page
   }, [city, websiteStatus, minLeadScore, loadBusinessesRef]);
 
   const handleUpdateRulePoints = async (ruleKey: string, newPoints: number) => {
@@ -123,7 +130,7 @@ export default function BusinessesPage() {
     });
     if (res.data) {
       loadScoringRules();
-      loadBusinesses();
+      loadBusinesses(offset);
     }
   };
 
@@ -212,7 +219,7 @@ export default function BusinessesPage() {
             Scoring Weights
           </button>
           <button
-            onClick={loadBusinesses}
+            onClick={() => loadBusinesses(offset)}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -390,6 +397,14 @@ export default function BusinessesPage() {
             </tbody>
           </table>
         </div>
+        <div className="border-t border-border/60 px-4">
+          <Pagination total={total} offset={offset} noun="businesses" onChange={(o) => { loadBusinesses(o); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+        </div>
+        {businesses.some(isGoogleRecord) && (
+          <div className="border-t border-border/60 px-5 py-2 text-[10px] text-muted-foreground">
+            Some businesses were found through Google Maps.
+          </div>
+        )}
         {businesses.some(isOsmRecord) && (
           <div className="border-t border-border/60 px-5 py-2 text-[10px] text-muted-foreground">
             Business data includes information ©{" "}
@@ -426,6 +441,17 @@ export default function BusinessesPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto py-5 space-y-6 text-xs">
+            {isGoogleRecord(selectedBiz) && (
+              <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                Found through Google Maps.{" "}
+                <a href={selectedBiz.original_source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                  View on Google Maps
+                </a>
+                . Left out of CSV exports by default.
+              </p>
+            )}
+            <GoogleLookup businessId={selectedBiz.id} />
+
             {/* Lead Score Card */}
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -540,6 +566,9 @@ export default function BusinessesPage() {
                   {selectedBiz.original_source_url}
                 </a>
               </div>
+              {isGoogleRecord(selectedBiz) && (
+                <div className="text-[10px] text-muted-foreground">Data from Google Maps</div>
+              )}
               {isOsmRecord(selectedBiz) && (
                 <div className="text-[10px] text-muted-foreground">
                   Data ©{" "}

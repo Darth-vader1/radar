@@ -5,6 +5,7 @@ from typing import Any, AsyncIterator, List, Optional, Tuple
 
 from pydantic import BaseModel
 
+from app.core.text import html_to_text
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
     DiscoverySeed,
@@ -100,8 +101,8 @@ class GreenhouseBoardsAdapter(SourceAdapter[NormalizedJob]):
         location_obj = raw.get("location", {})
         location_name = location_obj.get("name") if isinstance(location_obj, dict) else str(location_obj or "")
 
-        # HTML body description
-        desc_html = raw.get("content", "")
+        # Greenhouse sends the description as entity-escaped HTML; store readable plain text.
+        description = html_to_text(raw.get("content", ""))
 
         city = None
         country = None
@@ -125,7 +126,7 @@ class GreenhouseBoardsAdapter(SourceAdapter[NormalizedJob]):
             title=title,
             company_name=company_name,
             company_website=f"https://boards.greenhouse.io/{raw.get('company_token')}",
-            description=desc_html,
+            description=description,
             location_text=location_name or "Remote / Unspecified",
             city=city,
             country=country or "Worldwide",

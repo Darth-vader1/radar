@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from typing import Tuple
 from urllib.parse import urlparse
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.text import html_to_text, looks_like_html
 from app.database.locks import advisory_xact_lock
 from app.models.job import Job, JobSkill
 from app.modules.jobs.services.skill_extractor import (
@@ -73,6 +74,8 @@ class JobIngestionService:
         title = raw_data.get("title", "").strip()
         company = raw_data.get("company_name", "").strip()
         description = raw_data.get("description", "").strip()
+        if looks_like_html(description):
+            description = html_to_text(description)  # every source: store and show plain text
         apply_url = raw_data.get("application_url", original_source_url).strip()
 
         norm_title = normalize_title(title)
@@ -115,13 +118,16 @@ class JobIngestionService:
         existing = await db.scalar(stmt)
 
         if existing:
-            # Vacancy already discovered on another platform!
-            existing.other_sources_count += 1
+            same_source = source_id is not None and existing.primary_source_id == source_id
+            if not same_source:
+                existing.other_sources_count += 1  # the vacancy is also listed on another platform
             existing.last_verified_at = datetime.now(timezone.utc)
 
-            # Enrich missing fields without destroying original
-            if not existing.description and description:
+            # Enrich missing fields without destroying the original. The primary source may
+            # replace its own description (e.g. once full descriptions started arriving).
+            if description and (not existing.description or (same_source and existing.description != description)):
                 existing.description = description
+                await self._replace_skills(db, existing, title)
             if not existing.salary_max and raw_data.get("salary_max"):
                 existing.salary_min = raw_data.get("salary_min")
                 existing.salary_max = raw_data.get("salary_max")
@@ -172,17 +178,44 @@ class JobIngestionService:
         await db.flush()
 
         # 4. Extract and persist skills
-        skills_found = extract_skills_from_text(f"{title} {description}")
-        for s in skills_found:
-            job_skill = JobSkill(
-                job_id=new_job.id,
-                skill_name=s,
-                normalized_skill=s.lower(),
-                is_required=True,
-                extraction_origin="INFERRED",
-            )
-            db.add(job_skill)
+        for s in extract_skills_from_text(f"{title} {description}"):
+            db.add(JobSkill(job_id=new_job.id, skill_name=s, normalized_skill=s.lower(),
+                            is_required=True, extraction_origin="INFERRED"))
 
         await db.commit()
         await db.refresh(new_job)
         return new_job, "CREATED"
+
+    @staticmethod
+    async def _replace_skills(db: AsyncSession, job: Job, title: str) -> None:
+        """Re-derives a job's inferred skills from its current title and description."""
+        await db.execute(delete(JobSkill).where(JobSkill.job_id == job.id, JobSkill.extraction_origin == "INFERRED"))
+        for s in extract_skills_from_text(f"{title} {job.description}"):
+            db.add(JobSkill(job_id=job.id, skill_name=s, normalized_skill=s.lower(),
+                            is_required=True, extraction_origin="INFERRED"))
+
+
+async def clean_stored_job_text(db: AsyncSession, batch_size: int = 500) -> dict[str, int]:
+    """
+    One-off repair: converts stored HTML descriptions to plain text and re-extracts skills for
+    every job whose description changed. Idempotent. Returns counts.
+    """
+    cleaned = 0
+    last_id = None
+    while True:
+        stmt = select(Job).order_by(Job.id).limit(batch_size)
+        if last_id is not None:
+            stmt = stmt.where(Job.id > last_id)
+        jobs = (await db.scalars(stmt)).all()
+        if not jobs:
+            break
+        for job in jobs:
+            if looks_like_html(job.description):
+                job.description = html_to_text(job.description)
+                await JobIngestionService._replace_skills(db, job, job.title)
+                cleaned += 1
+        last_id = jobs[-1].id
+        await db.commit()
+    with_skills = await db.scalar(select(func.count(func.distinct(JobSkill.job_id)))) or 0
+    total = await db.scalar(select(func.count(Job.id))) or 0
+    return {"descriptions_cleaned": cleaned, "jobs_with_skills": with_skills, "jobs_total": total}

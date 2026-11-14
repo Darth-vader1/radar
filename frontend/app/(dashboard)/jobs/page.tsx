@@ -19,6 +19,7 @@ import {
   Building,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { Pagination, PAGE_SIZE } from "@/components/pagination";
 import { SaveButton } from "@/components/save-button";
 import { useLatest } from "@/lib/use-latest";
 import { isRemotiveJob } from "@/lib/attribution";
@@ -88,9 +89,13 @@ export default function JobsPage() {
   const [experienceLevel, setExperienceLevel] = useState("");
   const [search, setSearch] = useState("");
 
-  const loadJobs = async () => {
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+
+  const loadJobs = async (at = 0) => {
     setLoading(true);
-    const queryParts = [];
+    setOffset(at);
+    const queryParts = [`limit=${PAGE_SIZE}`, `offset=${at}`];
     if (category) queryParts.push(`category=${encodeURIComponent(category)}`);
     if (remoteStatus) queryParts.push(`remote_status=${encodeURIComponent(remoteStatus)}`);
     if (employmentType) queryParts.push(`employment_type=${encodeURIComponent(employmentType)}`);
@@ -101,6 +106,7 @@ export default function JobsPage() {
     const res = await fetchApi<JobItem[]>(`/jobs${queryStr}`);
     if (res.data) {
       setJobs(res.data);
+      setTotal(res.total);
     }
     setLoading(false);
   };
@@ -108,7 +114,7 @@ export default function JobsPage() {
   // Dropdown filters re-fetch immediately; text search re-fetches on Enter/submit.
   const loadJobsRef = useLatest(loadJobs);
   useEffect(() => {
-    loadJobsRef.current();
+    loadJobsRef.current(0); // filters changed: back to the first page
   }, [category, remoteStatus, employmentType, experienceLevel, loadJobsRef]);
 
   const handleSelectJob = async (jobId: string) => {
@@ -179,7 +185,7 @@ export default function JobsPage() {
           </div>
 
           <button
-            onClick={loadJobs}
+            onClick={() => loadJobs(offset)}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -424,6 +430,10 @@ export default function JobsPage() {
           </div>
         </div>
       )}
+      {!loading && (
+        <Pagination total={total} offset={offset} noun="jobs"
+                    onChange={(o) => { loadJobs(o); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+      )}
 
       {/* Slide-over Job Detail Drawer */}
       {selectedJob && (
@@ -490,10 +500,10 @@ export default function JobsPage() {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                 Role Description & Requirements
               </span>
-              <div
-                className="mt-3 prose prose-invert max-w-none text-xs text-foreground/90 space-y-2 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: selectedJob.description }}
-              />
+              {/* Plain text from the API (HTML is converted server-side); never rendered as HTML. */}
+              <p className="mt-3 whitespace-pre-line break-words text-xs leading-relaxed text-foreground/90">
+                {selectedJob.description || "No description provided."}
+              </p>
             </div>
 
             {/* Sighting & Provenance */}

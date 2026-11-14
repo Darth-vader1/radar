@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import missing_credentials
 from app.models.auth import Permission, Role, RolePermission
 from app.models.source import ConfigStatus, Source
+from app.modules.scraping.schedules import DEFAULT_SCHEDULES
 
 logger = logging.getLogger("radar.seed")
 
@@ -63,7 +64,9 @@ def default_sources() -> list[dict[str, Any]]:
             slug="google_places_api", name="Google Places API (New)", module_type="BUSINESS",
             source_category="places_api", base_url="https://places.googleapis.com/v1/places:searchText",
             adapter_key="google_places_api", requires_credentials=True, required_env_vars=["GOOGLE_PLACES_API_KEY"],
-            rate_limit_rpm=60, crawl_budget_pages=100, adapter_config={},
+            # Manual only, 3 pages (60 results) per run: see adapters/google_places.py.
+            rate_limit_rpm=60, crawl_budget_pages=3,
+            adapter_config={"manual_only": True, "default_query": "restaurants in Ikeja, Lagos"},
         ),
         dict(
             slug="greenhouse_tech_boards", name="Greenhouse Public Job Boards (Remote & Africa Tech)",
@@ -114,6 +117,7 @@ def default_sources() -> list[dict[str, Any]]:
     ]
     for s in sources:
         s.setdefault("collection_method", "OFFICIAL_API")
+        s.setdefault("schedule_cron", DEFAULT_SCHEDULES.get(s["slug"]))
         s["config_status"] = _status_for(s["required_env_vars"])
     return sources
 

@@ -118,6 +118,7 @@ class Settings(BaseSettings):
 
     # Optional 3rd Party API keys
     GOOGLE_PLACES_API_KEY: str | None = None
+    GOOGLE_LOOKUPS_PER_MINUTE: int = 20  # live "Look up on Google" calls per user
     WEB_SEARCH_API_KEY: str | None = None
     GOOGLE_CSE_ID: str | None = None
     HUNTER_API_KEY: str | None = None

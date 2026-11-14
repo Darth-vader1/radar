@@ -59,10 +59,29 @@ class BusinessRead(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     original_source_url: str
+    google_place_id: Optional[str] = None
     lead_score: int
     lead_score_explanation: List[Dict[str, Any]] = []
     discovered_at: datetime
     last_verified_at: Optional[datetime] = None
+
+
+class GoogleLiveDetails(BaseModel):
+    """Shown to the user and never stored (Google's terms only allow storing the place ID)."""
+    place_id: str
+    matched_by: str
+    name: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    international_phone: Optional[str] = None
+    website: Optional[str] = None
+    google_maps_url: Optional[str] = None
+    rating: Optional[float] = None
+    rating_count: Optional[int] = None
+    business_status: Optional[str] = None
+    category: Optional[str] = None
+    opening_hours: List[str] = []
+    attribution: str = "Google Maps"
 
 
 class BusinessDrawerDetail(BusinessRead):

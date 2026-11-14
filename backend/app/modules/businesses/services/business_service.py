@@ -86,6 +86,21 @@ class BusinessIngestionService:
         )
         existing = await db.scalar(stmt)
 
+        # Google results never merge into another source's business: that would mix Google
+        # content into rows "Remove all Google data" can't then delete. The place ID (which
+        # Google allows storing) is all an existing business gains.
+        if normalized.google_place_id:
+            if existing is None:
+                existing = await db.scalar(
+                    select(Business)
+                    .where(Business.google_place_id == normalized.google_place_id)
+                    .options(selectinload(Business.contacts), selectinload(Business.social_profiles))
+                )
+            if existing is not None and existing.primary_source_id != source_id:
+                if not existing.google_place_id:
+                    existing.google_place_id = normalized.google_place_id
+                return existing, "DEDUPLICATED"
+
         is_new = existing is None
         business = existing if existing else Business(
             name=normalized.name.strip(),
@@ -110,6 +125,8 @@ class BusinessIngestionService:
             business.city = normalized.city
         if is_new or not business.state:
             business.state = normalized.state
+        if normalized.google_place_id and not business.google_place_id:
+            business.google_place_id = normalized.google_place_id
         if is_new or (normalized.latitude and not business.latitude):
             business.latitude = normalized.latitude
             business.longitude = normalized.longitude
@@ -151,7 +168,7 @@ class BusinessIngestionService:
                 business,
                 contact_type="PHONE",
                 value=normalized.phone_number,
-                source="directory_seed",
+                source=normalized.data_origin,
                 status="UNVERIFIED",
             )
 

@@ -61,6 +61,8 @@ async def dispatch_due_sources(
         )).all()
 
         for source in sources:
+            if (source.adapter_config or {}).get("manual_only"):
+                continue  # e.g. Google Places: only ever run by hand
             if not is_valid_cron(source.schedule_cron):
                 logger.warning("Source %s has invalid schedule_cron %r; skipping.", source.slug, source.schedule_cron)
                 continue

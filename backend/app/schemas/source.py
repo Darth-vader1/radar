@@ -54,6 +54,23 @@ class SourceUpdate(_CronValidated):
     respect_robots_txt: Optional[bool] = None
 
 
+class SourceRunSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: str
+    trigger_type: str
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    pages_fetched: int = 0
+    records_extracted: int = 0
+    records_created: int = 0
+    records_updated: int = 0
+    errors_count: int = 0
+    error_summary: Optional[str] = None
+    created_at: datetime
+
+
 class SourceRead(SourceBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -65,6 +82,10 @@ class SourceRead(SourceBase):
     total_records_collected: int = 0
     created_at: datetime
     updated_at: datetime
+    # Live view for the Sources page; filled in by the API, not stored on the source.
+    active_run: Optional[SourceRunSummary] = None  # queued or running right now
+    last_run: Optional[SourceRunSummary] = None  # most recent finished run
+    next_run_at: Optional[datetime] = None  # when the scheduler will next start it
 
 
 class SourceRunCreate(BaseModel):

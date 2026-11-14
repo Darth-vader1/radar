@@ -1,6 +1,6 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, SmallInteger, String, Text, text
@@ -211,7 +211,7 @@ class ExtractedRecord(Base, UUIDMixin, TimestampMixin):
     raw_payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
     processing_status: Mapped[str] = mapped_column(String(40), default="EXTRACTED", nullable=False)
     validation_errors: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     source: Mapped["Source"] = relationship("Source", back_populates="extracted_records")
 

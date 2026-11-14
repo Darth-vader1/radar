@@ -13,14 +13,16 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db, require_roles
 from app.core.config import get_credential, settings
 from app.models.auth import AuditLog, RefreshToken, Role, User
-from app.models.source import Source
+from app.models.business import Business
+from app.models.saved import SavedRecord
+from app.models.source import ExtractedRecord, Source
 from app.schemas.auth import AdminUserRead, AdminUserUpdate
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
@@ -161,3 +163,59 @@ async def list_integrations(
         credentials=[sentry], note=None if sentry.configured else "Optional. Errors are still written to the logs.",
     ))
     return out
+
+
+# --- Google data --------------------------------------------------------------
+
+GOOGLE_SOURCE_KEY = "google_places_api"
+
+
+class GoogleDataSummary(BaseModel):
+    businesses: int
+    raw_records: int
+
+
+async def _google_source_ids(db: AsyncSession) -> List[uuid.UUID]:
+    return list((await db.scalars(select(Source.id).where(Source.adapter_key == GOOGLE_SOURCE_KEY))).all())
+
+
+async def _google_summary(db: AsyncSession, source_ids: List[uuid.UUID]) -> GoogleDataSummary:
+    if not source_ids:
+        return GoogleDataSummary(businesses=0, raw_records=0)
+    businesses = await db.scalar(select(func.count(Business.id)).where(Business.primary_source_id.in_(source_ids))) or 0
+    raw = await db.scalar(select(func.count(ExtractedRecord.id)).where(ExtractedRecord.source_id.in_(source_ids))) or 0
+    return GoogleDataSummary(businesses=businesses, raw_records=raw)
+
+
+@router.get("/google-data", response_model=GoogleDataSummary)
+async def google_data_summary(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """How much data from Google Places is stored (businesses found by Google, raw responses)."""
+    return await _google_summary(db, await _google_source_ids(db))
+
+
+@router.delete("/google-data", response_model=GoogleDataSummary)
+async def remove_google_data(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Deletes every business that came from Google Places, its raw API responses, and saved-record
+    bookmarks pointing at those businesses. Google place IDs on other businesses are kept (Google
+    allows storing them). Returns what was removed.
+    """
+    source_ids = await _google_source_ids(db)
+    removed = await _google_summary(db, source_ids)
+    if source_ids:
+        business_ids = select(Business.id).where(Business.primary_source_id.in_(source_ids))
+        await db.execute(delete(SavedRecord).where(
+            SavedRecord.entity_type == "BUSINESS", SavedRecord.entity_id.in_(business_ids),
+        ))
+        await db.execute(delete(ExtractedRecord).where(ExtractedRecord.source_id.in_(source_ids)))
+        await db.execute(delete(Business).where(Business.primary_source_id.in_(source_ids)))
+    db.add(AuditLog(actor_user_id=current_user.id, action="google_data:removed", resource_type="source",
+                    resource_id=GOOGLE_SOURCE_KEY, metadata_json=removed.model_dump()))
+    await db.commit()
+    return removed

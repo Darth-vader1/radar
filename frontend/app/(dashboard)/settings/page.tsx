@@ -452,7 +452,64 @@ function ApiKeysSection() {
 
 // --- Integrations ------------------------------------------------------------
 
-function IntegrationsSection() {
+function GoogleDataControls({ canRemove }: { canRemove: boolean }) {
+  const [summary, setSummary] = useState<{ businesses: number; raw_records: number } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    const r = await fetchApi<{ businesses: number; raw_records: number }>("/admin/google-data");
+    if (r.data) setSummary(r.data);
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const remove = async () => {
+    setBusy(true);
+    const r = await fetchApi<{ businesses: number; raw_records: number }>("/admin/google-data", { method: "DELETE" });
+    setBusy(false);
+    setConfirming(false);
+    if (r.data) {
+      setNotice({ kind: "ok", text: `Removed ${r.data.businesses} businesses and ${r.data.raw_records} raw Google responses.` });
+      load();
+    } else setNotice({ kind: "error", text: r.error ?? "Could not remove the Google data." });
+  };
+
+  if (!summary) return null;
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-semibold">Stored Google data</div>
+          <p className="text-[11px] text-muted-foreground">
+            {summary.businesses.toLocaleString()} businesses found through Google Places. Live lookups are never stored.
+          </p>
+        </div>
+        {canRemove && summary.businesses + summary.raw_records > 0 && (
+          confirming ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="text-muted-foreground">Delete permanently?</span>
+              <button type="button" onClick={remove} disabled={busy}
+                      className="inline-flex items-center gap-1 rounded bg-destructive px-2.5 py-1 font-semibold text-destructive-foreground disabled:opacity-50">
+                {busy && <Loader2 className="h-3 w-3 animate-spin" />} Remove
+              </button>
+              <button type="button" onClick={() => setConfirming(false)} className="text-muted-foreground hover:text-foreground">Cancel</button>
+            </span>
+          ) : (
+            <button type="button" onClick={() => setConfirming(true)} className={quietButton}>
+              <Trash2 className="h-3.5 w-3.5" /> Remove all Google data
+            </button>
+          )
+        )}
+      </div>
+      {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
+    </div>
+  );
+}
+
+function IntegrationsSection({ isAdmin }: { isAdmin: boolean }) {
   const [items, setItems] = useState<Integration[] | null>(null);
   useEffect(() => {
     fetchApi<Integration[]>("/admin/integrations").then((r) => setItems(r.data ?? []));
@@ -487,6 +544,7 @@ function IntegrationsSection() {
           ))}
         </ul>
       )}
+      <GoogleDataControls canRemove={isAdmin} />
     </Section>
   );
 }
@@ -639,7 +697,7 @@ export default function SettingsPage() {
           <PasswordSection onChanged={() => setSessionsVersion((v) => v + 1)} />
           <SessionsSection refreshKey={sessionsVersion} />
           <ApiKeysSection />
-          <IntegrationsSection />
+          <IntegrationsSection isAdmin={isAdmin} />
           {isAdmin && <UsersSection me={user} />}
         </>
       )}

@@ -19,6 +19,7 @@ from app.models.business import Business
 from app.models.event import Event
 from app.models.job import Job
 from app.models.saved import SavedRecord
+from app.modules.businesses.adapters.google_places import is_google_maps_url
 from app.schemas.saved import (
     EntitySummary,
     EntityType,
@@ -238,13 +239,23 @@ async def export_saved_csv(
     entity_type: Optional[EntityType] = Query(None),
     tag: Optional[str] = Query(None, max_length=32),
     q: Optional[str] = Query(None, max_length=200),
+    include_google: bool = Query(False, description="Include businesses that came from Google Places"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """CSV of the user's saved records (same filters as the list)."""
+    """
+    CSV of the user's saved records (same filters as the list). Businesses found through Google
+    Places are left out unless include_google=true, so Google data doesn't spread beyond RADAR.
+    """
     stmt = _filtered(current_user, entity_type, tag, q).order_by(SavedRecord.entity_type, SavedRecord.created_at.desc())
     records = (await db.scalars(stmt.limit(MAX_SAVED_PER_USER))).all()
     entities = await _load_entities(db, records)
+    if not include_google:
+        records = [
+            r for r in records
+            if not (r.entity_type == "BUSINESS"
+                    and is_google_maps_url(getattr(entities.get((r.entity_type, r.entity_id)), "original_source_url", None)))
+        ]
 
     buf = io.StringIO()
     writer = csv.writer(buf)

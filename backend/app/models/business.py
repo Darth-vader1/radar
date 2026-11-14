@@ -96,6 +96,8 @@ class Business(Base, UUIDMixin, TimestampMixin):
     original_source_url: Mapped[str] = mapped_column(Text, nullable=False)
 
     lead_score: Mapped[int] = mapped_column(SmallInteger, default=0, index=True, nullable=False)
+    # Google place ID (storable indefinitely under Google's terms), used for live lookups.
+    google_place_id: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
     lead_score_explanation: Mapped[List[Dict[str, Any]]] = mapped_column(JSONB, default=list, nullable=False)
 
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

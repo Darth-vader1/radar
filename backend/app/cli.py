@@ -90,6 +90,14 @@ async def seed() -> dict[str, int]:
     return added
 
 
+async def clean_jobs() -> dict[str, int]:
+    from app.database.session import AsyncSessionLocal
+    from app.modules.jobs.services.job_service import clean_stored_job_text
+
+    async with AsyncSessionLocal() as db:
+        return await clean_stored_job_text(db)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="RADAR operational commands")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -101,6 +109,8 @@ def main(argv: list[str] | None = None) -> None:
     admin.add_argument("--name", default=None)
     admin.add_argument("--reset-password", action="store_true", help="Also set a new password for an existing user")
 
+    sub.add_parser("clean-jobs", help="Convert stored HTML job descriptions to plain text and re-extract skills")
+
     args = parser.parse_args(argv)
     if args.command == "seed":
         added = asyncio.run(seed())
@@ -108,6 +118,9 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "create-admin":
         outcome = asyncio.run(create_admin(args.email, args.name, args.reset_password))
         print(f"Super admin {args.email} {outcome}.")
+    elif args.command == "clean-jobs":
+        result = asyncio.run(clean_jobs())
+        print("Job text cleaned: " + ", ".join(f"{k}={v}" for k, v in result.items()))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { Pagination, PAGE_SIZE } from "@/components/pagination";
 import { SaveButton } from "@/components/save-button";
 import { useLatest } from "@/lib/use-latest";
 import { formatDate } from "@/lib/utils";
@@ -123,10 +124,13 @@ export default function EventsPage() {
   const [search, setSearch] = useState("");
 
   const requestSeq = useRef(0);
-  const loadData = async () => {
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+  const loadData = async (at = 0) => {
     const seq = ++requestSeq.current;
     setLoading(true);
-    const queryParts = [`reach=${reach}`];
+    setOffset(at);
+    const queryParts = [`reach=${reach}`, `limit=${PAGE_SIZE}`, `offset=${at}`];
     if (category) queryParts.push(`category=${encodeURIComponent(category)}`);
     if (deliveryMode) queryParts.push(`delivery_mode=${encodeURIComponent(deliveryMode)}`);
     if (hasCashOnly) queryParts.push("has_cash_prizes=true");
@@ -143,6 +147,7 @@ export default function EventsPage() {
 
     if (eventsRes.data) {
       setEvents(eventsRes.data);
+      setTotal(eventsRes.total);
     }
     if (statsRes.data) {
       setStats(statsRes.data);
@@ -157,7 +162,7 @@ export default function EventsPage() {
     setReach(initialReach());
   }, []);
   useEffect(() => {
-    loadDataRef.current();
+    loadDataRef.current(0); // filters changed: back to the first page
   }, [reach, category, deliveryMode, hasCashOnly, studentOnly, loadDataRef]);
 
   const chooseReach = (value: Reach) => {
@@ -244,7 +249,7 @@ export default function EventsPage() {
           </p>
         </div>
         <button
-          onClick={loadData}
+          onClick={() => loadData(offset)}
           disabled={loading}
           className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
         >
@@ -516,6 +521,10 @@ export default function EventsPage() {
             );
           })}
         </div>
+      )}
+      {!loading && (
+        <Pagination total={total} offset={offset} noun="events"
+                    onChange={(o) => { loadData(o); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
       )}
 
       {/* Slide-over Detail Drawer */}

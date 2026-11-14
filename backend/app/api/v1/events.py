@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.api.pagination import paginate
 from app.models.auth import User
 from app.models.event import Event, EventCategory, EventCategoryLink, EventStatus
 from app.modules.events.services.region import REACH_VALUES, reach_clause
@@ -25,6 +26,7 @@ CLOSING_SOON_WINDOW = timedelta(days=7)
 
 @router.get("", response_model=List[EventRead])
 async def list_events(
+    response: Response,
     event_type: Optional[str] = Query(None),
     delivery_mode: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -92,9 +94,7 @@ async def list_events(
             | func.lower(Event.description).like(search_term)
         )
 
-    stmt = stmt.limit(limit).offset(offset)
-    results = await db.scalars(stmt)
-    return list(results.all())
+    return await paginate(db, stmt, limit, offset, response)
 
 
 @router.get("/categories", response_model=List[EventCategoryRead])

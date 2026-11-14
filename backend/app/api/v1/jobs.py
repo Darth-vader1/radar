@@ -1,12 +1,13 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db
+from app.api.pagination import paginate
 from app.models.auth import User
 from app.models.job import Job, JobSkill
 from app.schemas.job import (
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/jobs", tags=["JobRadar"])
 
 @router.get("", response_model=List[JobRead])
 async def list_jobs(
+    response: Response,
     category: Optional[str] = Query(None),
     employment_type: Optional[str] = Query(None),
     remote_status: Optional[str] = Query(None),
@@ -66,9 +68,7 @@ async def list_jobs(
             | func.lower(Job.description).like(search_term)
         )
 
-    stmt = stmt.limit(limit).offset(offset)
-    results = await db.scalars(stmt)
-    return list(results.all())
+    return await paginate(db, stmt, limit, offset, response)
 
 
 @router.get("/skills/top", response_model=List[SkillCountItem])
