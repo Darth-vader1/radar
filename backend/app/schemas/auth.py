@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -84,3 +84,39 @@ class ApiKeyRead(BaseModel):
 
 class ApiKeyCreatedResponse(ApiKeyRead):
     raw_api_key: str = Field(..., description="Copy this key now; it cannot be shown again.")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128, description="Minimum 8 characters")
+
+
+class ProfileUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, max_length=160)
+
+
+class SessionRead(BaseModel):
+    """One signed-in device: a refresh-token family."""
+    id: uuid.UUID  # the session (family) id
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    signed_in_at: datetime
+    last_active_at: datetime
+    current: bool
+
+
+class AdminUserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    full_name: Optional[str] = None
+    is_active: bool
+    roles: List[RoleRead] = []
+    created_at: datetime
+    last_login_at: Optional[datetime] = None
+
+
+class AdminUserUpdate(BaseModel):
+    role: Optional[Literal["super_admin", "admin", "researcher", "standard_user"]] = None
+    is_active: Optional[bool] = None

@@ -161,9 +161,9 @@ export default function OverviewPage() {
             <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3.5">
               <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
               <div>
-                <span className="text-xs font-semibold">Optional AI Intelligence</span>
+                <span className="text-xs font-semibold">Rule-based Insights</span>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Decoupled LLM abstraction (Gemini, OpenAI, Local vLLM) with cost & token logs.
+                  Skill demand, hiring trends, event deadlines and top leads, computed from collected data.
                 </p>
               </div>
             </div>

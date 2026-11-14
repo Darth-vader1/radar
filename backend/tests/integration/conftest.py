@@ -51,6 +51,7 @@ def _run_migrations(sync_url) -> None:
 
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg.attributes["configure_logger"] = False  # keep the app's logging configuration intact
     original = settings.DATABASE_SYNC_URL
     # alembic/env.py reads the URL from settings
     settings.DATABASE_SYNC_URL = sync_url.render_as_string(hide_password=False)

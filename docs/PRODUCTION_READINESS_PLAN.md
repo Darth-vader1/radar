@@ -198,6 +198,26 @@ Phases are ordered by dependency. Each phase ends in something deployable and te
 4. Build and push images on tag, deploy to staging, smoke test `/health/ready`, then promote.
 
 ### Phase 8: Product completeness and compliance (ongoing)
+
+> **Real data sources (2026-11-12).** Every source was tested live, and the broken ones were fixed (migration `007_fix_seeded_sources` updates existing rows).
+>
+> | Source | Status |
+> |---|---|
+> | Devpost | Working (9 hackathons) |
+> | Zindi | Fixed. The API moved to `api.zindi.world`; the adapter now uses `status=open`, real field names, and USD-only prize parsing (6 open competitions). |
+> | MLH | Rewritten. There is no API; the adapter parses the Inertia JSON embedded in `www.mlh.com/seasons/<year>/events` (24 upcoming hackathons). |
+> | Greenhouse | Fixed. Dead boards (Paystack, Andela, Wave) were replaced with 9 verified boards, and a per-source `max_response_mb` override was added for large boards (about 1,900 jobs). |
+> | Remotive | Working (14 jobs, the whole free feed). The robots.txt check is off; their API terms are followed instead (migration 008): one request per run, at most 1 request per minute and 6 hours between runs (their limit is 4 calls a day), and every job is credited "via Remotive" with a link back. **Their terms forbid showing their jobs to collect sign-ups**, so keep RADAR internal, or hide Remotive jobs if it ever offers public registration. |
+> | OSM Overpass | Working (65 businesses in Ikeja). The robots.txt check is off, under Overpass's fair-use policy: at least 1 hour between runs and a 90 s timeout. Data is credited "© OpenStreetMap contributors (ODbL)" in the UI. |
+> | Google Places, Kaggle | Need `GOOGLE_PLACES_API_KEY`, or `KAGGLE_USERNAME` and `KAGGLE_KEY`. |
+>
+> **Other fixes from real runs:**
+> - Devpost's prize field contained HTML (`$<span …>30,000</span>`), and its dates are human-readable text. Both are parsed now.
+> - Re-runs now update records whose source data changed, where before they skipped every known record.
+> - A shared 60 s DNS cache was added, because some resolvers take up to 10 s per lookup and every request resolved its host twice.
+> - Business enrichment is still slow: one Overpass run took over 35 minutes and was reaped. Making it concurrent is Phase 4 work.
+>
+> **Job deduplication bug fixed.** Matching on company and title alone merged distinct openings, such as one title advertised in several cities. Jobs now merge only on the same application URL, or on the same company, title and location coming from a *different* source.
 1. Frontend: build the Events page against the new `/events` API. Either build out or hide Analytics, Intelligence and Saved; don't ship placeholder nav items. Wire the Jobs page to `/jobs` (it currently makes no `fetchApi` calls).
 2. Decide on the AI stage. `AI_ENABLED` and provider keys exist, but there's no implementation. Either build the provider abstraction behind the flag or remove the config and dependencies.
 3. **Data compliance** (BusinessRadar collects contact data): document a lawful basis and retention period; add retention jobs for `extracted_records` and `audit_logs`; add a suppression or opt-out list checked at ingest; honour the ToS of each source (Google Places terms forbid caching beyond limits).

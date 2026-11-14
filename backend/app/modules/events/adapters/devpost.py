@@ -1,6 +1,8 @@
+import html
 import json
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import datetime, time, timezone
 from typing import Any, AsyncIterator, List, Optional, Tuple
 
 from pydantic import BaseModel
@@ -41,6 +43,66 @@ class NormalizedEvent(BaseModel):
     source_platform: str = "devpost"
     source_url: str
     themes: List[str] = []
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_MONTH_DAY_YEAR = re.compile(r"^(?P<mon>[A-Za-z]{3,9})\s+(?P<day>\d{1,2})(?:,\s*(?P<year>\d{4}))?$")
+_DAY_YEAR = re.compile(r"^(?P<day>\d{1,2})(?:,\s*(?P<year>\d{4}))?$")
+
+
+def strip_html(value: Optional[str]) -> str:
+    """Devpost embeds markup in some fields, e.g. '$<span data-currency-value>30,000</span>'."""
+    return html.unescape(_TAG_RE.sub("", value or "")).strip()
+
+
+def _date(mon: str, day: str, year: int) -> Optional[datetime]:
+    for fmt in ("%b %d %Y", "%B %d %Y"):
+        try:
+            return datetime.strptime(f"{mon[:3] if fmt == '%b %d %Y' else mon} {day} {year}", fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_submission_period(text: Optional[str]) -> tuple[Optional[datetime], Optional[datetime]]:
+    """
+    Parses Devpost's human-readable submission period into (start, end) UTC datetimes.
+    Handles "Oct 30 - Dec 04, 2026", "Nov 01 - 15, 2026" and "Dec 15, 2026 - Jan 10, 2027".
+    The end is set to 23:59:59 UTC that day (Devpost doesn't publish the exact cut-off time).
+    """
+    if not text or " - " not in text:
+        return None, None
+    left, right = (part.strip() for part in text.split(" - ", 1))
+    r = _MONTH_DAY_YEAR.match(right) or _DAY_YEAR.match(right)
+    lm = _MONTH_DAY_YEAR.match(left)
+    if not r or not lm or not (r.groupdict().get("year") or lm.group("year")):
+        return None, None
+    end_year = int(r.group("year") or lm.group("year"))
+    end_mon = r.groupdict().get("mon") or lm.group("mon")
+    end = _date(end_mon, r.group("day"), end_year)
+    start_year = int(lm.group("year")) if lm.group("year") else end_year
+    start = _date(lm.group("mon"), lm.group("day"), start_year)
+    if start and end and start > end and not lm.group("year"):
+        start = start.replace(year=start_year - 1)  # e.g. "Dec 15 - Jan 10, 2027"
+    if end:
+        end = datetime.combine(end.date(), time(23, 59, 59), tzinfo=timezone.utc)
+    return start, end
+
+
+def parse_prize(raw_prize: Optional[str]) -> tuple[Optional[str], bool, Optional[float]]:
+    """Returns (summary, has_cash, usd_estimate). Only dollar amounts get a USD estimate."""
+    text = strip_html(raw_prize)
+    if not text:
+        return None, False, None
+    digits = re.sub(r"[^\d.]", "", text)
+    try:
+        amount = float(digits) if digits else 0.0
+    except ValueError:
+        amount = 0.0
+    usd = amount if amount > 0 and "$" in text else None
+    if amount <= 0 and not re.search(r"[A-Za-z]", text):
+        return None, False, None  # a bare "$0" says nothing useful
+    return (f"{text} in prizes" if amount > 0 else text), amount > 0, usd
 
 
 @register_adapter("devpost_hackathons")
@@ -104,36 +166,21 @@ class DevpostHackathonsAdapter(SourceAdapter[NormalizedEvent]):
         organizer = raw.get("organization_name") or raw.get("displayed_location", {}).get("location")
         url = raw.get("url", item.source_url)
 
-        # Dates & deadlines
-        deadline_dt = None
+        # Dates: the public API gives a readable period ("Oct 30 - Dec 04, 2026"), not timestamps.
         submission_period = raw.get("submission_period_dates") or ""
-        # Devpost sometimes provides direct ISO timestamps
-        sub_ends_at = raw.get("submission_period_ends_at")
+        start_dt, deadline_dt = parse_submission_period(submission_period)
+        sub_ends_at = raw.get("submission_period_ends_at")  # present in some API variants
         if sub_ends_at:
             try:
                 deadline_dt = datetime.fromisoformat(sub_ends_at.replace("Z", "+00:00"))
             except ValueError:
                 pass
 
-        # Delivery mode
+        # Delivery mode: Devpost marks online hackathons; everything else is in person.
         is_online = raw.get("online") or ("online" in str(raw.get("displayed_location", "")).lower())
-        delivery_mode = "VIRTUAL" if is_online else "HYBRID"
+        delivery_mode = "VIRTUAL" if is_online else "PHYSICAL"
 
-        # Prize parsing
-        prize_summary = None
-        has_cash = False
-        prize_usd = None
-        prize_str = raw.get("prize_amount")
-        if prize_str:
-            prize_summary = f"{prize_str} in prizes"
-            # Strip '$' and commas to convert to float
-            clean_digits = "".join(c for c in prize_str if c.isdigit() or c == ".")
-            if clean_digits:
-                try:
-                    prize_usd = float(clean_digits)
-                    has_cash = prize_usd > 0
-                except ValueError:
-                    pass
+        prize_summary, has_cash, prize_usd = parse_prize(raw.get("prize_amount"))
 
         # Themes / tags
         themes = []
@@ -157,6 +204,10 @@ class DevpostHackathonsAdapter(SourceAdapter[NormalizedEvent]):
             registration_url=url,
             event_website=url,
             registration_deadline=deadline_dt,
+            # Devpost publishes the submission window; people can join until it closes, so the
+            # deadline drives the status (open / closing soon / closed). Judging end is unknown.
+            start_date=start_dt,
+            end_date=None,
             prize_summary=prize_summary,
             has_cash_prizes=has_cash,
             prize_amount_usd_est=prize_usd,

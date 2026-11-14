@@ -102,3 +102,5 @@ class EventStatsResponse(BaseModel):
     student_eligible_count: int
     by_category: dict[str, int]
     by_delivery_mode: dict[str, int]
+    # Active events per reach filter (nigeria / in_nigeria / all), ignoring the current filter.
+    by_reach: dict[str, int] = {}

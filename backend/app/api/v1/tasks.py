@@ -23,6 +23,7 @@ from app.modules.scraping.pipeline import RETRY_SEEDS_KEY
 from app.modules.scraping.runs import (
     QueueUnavailableError,
     RunAlreadyActiveError,
+    RunTooSoonError,
     create_and_dispatch_run,
 )
 from app.schemas.source import (
@@ -88,6 +89,12 @@ async def _create_run_or_http_error(db, source, trigger_type, search_params, use
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Source '{source.slug}' already has a queued or running run"
                    + (f" ({exc.active_run_id})." if exc.active_run_id else "."),
+        )
+    except RunTooSoonError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
         )
     except QueueUnavailableError:
         raise HTTPException(

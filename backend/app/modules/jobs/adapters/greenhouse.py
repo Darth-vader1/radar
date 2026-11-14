@@ -43,9 +43,9 @@ class GreenhouseBoardsAdapter(SourceAdapter[NormalizedJob]):
     collection_method = CollectionMethod.OFFICIAL_API
     required_env_vars = ()
 
-    DEFAULT_BOARD_TOKENS = [
-        "paystack", "moniepoint", "andela", "wave", "gitlab", "cloudflare"
-    ]
+    # Verified public Greenhouse boards (2026-11). Companies can move off Greenhouse at any
+    # time; a missing board returns 404 and is logged, not treated as a crash.
+    DEFAULT_BOARD_TOKENS = ["moniepoint", "turing", "gitlab", "cloudflare", "twilio", "mongodb", "figma", "vercel", "elastic"]
 
     async def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
         board_tokens = self.source_config.get("board_tokens") or self.DEFAULT_BOARD_TOKENS

@@ -30,6 +30,7 @@ from app.models.job import (
     JobStatus,
     RemoteStatus,
 )
+from app.models.saved import SavedEntityType, SavedRecord
 from app.models.source import (
     CollectionMethod,
     ConfigStatus,
@@ -66,6 +67,8 @@ __all__ = [
     "TaskStage",
     "TaskStatus",
     "Business",
+    "SavedRecord",
+    "SavedEntityType",
     "BusinessContact",
     "BusinessSocialProfile",
     "EmailVerification",

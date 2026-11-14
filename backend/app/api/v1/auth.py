@@ -23,7 +23,10 @@ from app.schemas.auth import (
     ApiKeyCreate,
     ApiKeyCreatedResponse,
     ApiKeyRead,
+    ChangePasswordRequest,
+    ProfileUpdate,
     RefreshRequest,
+    SessionRead,
     Token,
     UserCreate,
     UserLogin,
@@ -304,6 +307,169 @@ async def logout_all(
 @router.get("/me", response_model=UserRead)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.patch("/me", response_model=UserRead)
+async def update_me(
+    payload: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Updates the signed-in user's display name."""
+    current_user.full_name = (payload.full_name or "").strip() or None
+    await db.commit()
+    return await db.scalar(select(User).where(User.id == current_user.id).options(selectinload(User.roles)))
+
+
+# --- Password & sessions ---
+
+def _current_family(request: Request, user: User) -> Optional[uuid.UUID]:
+    """The session family of this browser, from its refresh cookie (sent only to /auth routes)."""
+    raw = request.cookies.get(settings.REFRESH_COOKIE_NAME)
+    claims = decode_token(raw) if raw else {}
+    if not claims or claims.get("type") != "refresh" or claims.get("sub") != str(user.id):
+        return None
+    try:
+        return uuid.UUID(claims.get("fam"))
+    except (ValueError, TypeError):
+        return None
+
+
+async def _end_other_sessions(db: AsyncSession, user: User, keep_family: Optional[uuid.UUID]) -> int:
+    """
+    Revokes every session except `keep_family` and invalidates all outstanding access tokens.
+    Returns how many other live sessions were ended.
+    """
+    now = datetime.now(timezone.utc)
+    conditions = [RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)]
+    if keep_family is not None:
+        conditions.append(RefreshToken.family_id != keep_family)
+    live_families = (await db.scalars(select(RefreshToken.family_id).where(
+        *conditions, RefreshToken.used_at.is_(None), RefreshToken.expires_at > now,
+    ))).all()
+    await db.execute(update(RefreshToken).where(*conditions).values(revoked_at=now))
+    user.token_version = (user.token_version or 0) + 1
+    return len(set(live_families))
+
+
+async def _reissue_current_session(
+    db: AsyncSession, user: User, request: Request, response: Response, family: Optional[uuid.UUID]
+) -> None:
+    """After token_version changes, give this browser fresh tokens so it stays signed in."""
+    if family is None:
+        return
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.family_id == family, RefreshToken.used_at.is_(None), RefreshToken.revoked_at.is_(None))
+        .values(used_at=now)
+    )
+    await _issue_session(db, user, request, response, family_id=family)
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Changes the password after checking the current one. Every other device is signed out;
+    this browser stays signed in with fresh tokens.
+    """
+    await enforce_rate_limit(
+        f"change-password:{current_user.id}", settings.LOGIN_RATE_LIMIT_PER_MINUTE, 60,
+        detail="Too many password change attempts.",
+    )
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The new password must be different.")
+
+    family = _current_family(request, current_user)
+    current_user.password_hash = get_password_hash(payload.new_password)
+    ended = await _end_other_sessions(db, current_user, keep_family=family)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    await _reissue_current_session(db, current_user, request, response, family)
+    db.add(AuditLog(
+        actor_user_id=current_user.id, action="auth:password_changed", resource_type="user",
+        resource_id=str(current_user.id), ip_address=client_ip(request)[:45],
+        metadata_json={"other_sessions_ended": ended},
+    ))
+    await db.commit()
+    return response
+
+
+@router.get("/sessions", response_model=List[SessionRead])
+async def list_sessions(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Devices currently signed in to this account; this browser first, then most recently active."""
+    now = datetime.now(timezone.utc)
+    rows = (await db.scalars(
+        select(RefreshToken)
+        .where(RefreshToken.user_id == current_user.id, RefreshToken.revoked_at.is_(None))
+        .order_by(RefreshToken.created_at)
+    )).all()
+    first_seen: dict[uuid.UUID, datetime] = {}
+    live: dict[uuid.UUID, RefreshToken] = {}
+    for token in rows:
+        first_seen.setdefault(token.family_id, token.created_at)
+        if token.used_at is None and token.expires_at > now:
+            live[token.family_id] = token
+    current = _current_family(request, current_user)
+    sessions = [
+        SessionRead(
+            id=fam, ip_address=t.ip_address, user_agent=t.user_agent,
+            signed_in_at=first_seen[fam], last_active_at=t.created_at, current=fam == current,
+        )
+        for fam, t in live.items()
+    ]
+    return sorted(sessions, key=lambda x: (not x.current, -x.last_active_at.timestamp()))
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_session(
+    session_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Signs out one other device. Use /auth/logout to sign out of this one."""
+    if session_id == _current_family(request, current_user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use Sign out to end this session.")
+    owned = await db.scalar(select(RefreshToken.id).where(
+        RefreshToken.family_id == session_id, RefreshToken.user_id == current_user.id,
+    ).limit(1))
+    if owned is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    await _revoke_family(db, session_id)
+    db.add(AuditLog(actor_user_id=current_user.id, action="auth:session_revoked", resource_type="session",
+                    resource_id=str(session_id)))
+    await db.commit()
+
+
+@router.post("/logout-others", response_model=dict)
+async def logout_others(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Signs out every other device immediately; this browser stays signed in."""
+    family = _current_family(request, current_user)
+    if family is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No browser session found; use /auth/logout-all instead.")
+    ended = await _end_other_sessions(db, current_user, keep_family=family)
+    await _reissue_current_session(db, current_user, request, response, family)
+    db.add(AuditLog(actor_user_id=current_user.id, action="auth:logout_others", resource_type="user",
+                    resource_id=str(current_user.id), metadata_json={"sessions_ended": ended}))
+    await db.commit()
+    return {"sessions_ended": ended}
 
 
 # --- API Key Management ---

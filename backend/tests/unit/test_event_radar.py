@@ -164,22 +164,21 @@ def test_devpost_adapter_normalization():
 
 
 def test_zindi_adapter_normalization():
-    adapter = ZindiCompetitionsAdapter(
-        source_config={},
-        rate_policy=RateLimitPolicy(requests_per_minute=20)
-    )
-
+    """Real api.zindi.world record shape (2026-11): `id` is the URL slug, times are *_time."""
+    adapter = ZindiCompetitionsAdapter(source_config={}, rate_policy=RateLimitPolicy(requests_per_minute=20))
     item = ExtractedItem(
-        external_id="zindi_c1",
-        source_url="https://zindi.africa/competitions/crop-yield-prediction-challenge",
+        external_id="zindi_GenAI-for-Good-Challenge",
+        source_url="https://zindi.africa/competitions/GenAI-for-Good-Challenge",
         raw_data={
-            "id": "c1",
-            "slug": "crop-yield-prediction-challenge",
-            "title": "Crop Yield Prediction Challenge for African Agriculture",
-            "host": "FAO & Zindi",
-            "reward": "$12,000",
-            "tags": ["Agritech", "Machine Learning", "Climate"],
-            "end_date": "2026-12-31T23:59:59Z",
+            "id": "GenAI-for-Good-Challenge",
+            "title": "GenAI for Good Challenge: Cities Edition",
+            "organization": "IEEE Humanitarian Technologies x UNDP",
+            "reward": "$40 000 USD",
+            "reward_type": "prize",
+            "open": True,
+            "start_time": "2026-11-05T16:30:00.000Z",
+            "end_time": "2026-12-13T04:59:00.000Z",
+            "entries_close_at": None,
         },
         discovered_at=datetime.now(timezone.utc),
     )
@@ -189,6 +188,9 @@ def test_zindi_adapter_normalization():
 
     assert outcome.is_valid is True
     assert normalized.event_type == "COMPETITION"
+    assert normalized.registration_url == "https://zindi.africa/competitions/GenAI-for-Good-Challenge"
     assert normalized.has_cash_prizes is True
-    assert normalized.prize_amount_usd_est == 12000.0
-    assert normalized.organizer == "FAO & Zindi"
+    assert normalized.prize_amount_usd_est == 40000.0
+    assert normalized.organizer == "IEEE Humanitarian Technologies x UNDP"
+    assert normalized.start_date.year == 2026 and normalized.end_date.month == 12
+    assert normalized.registration_deadline == normalized.end_date  # no separate entries deadline

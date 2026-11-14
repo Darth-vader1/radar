@@ -8,12 +8,12 @@ create-admin`) and does NOT insert sample/demo records: everything shown to user
 come from a real source.
 """
 import logging
-import os
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import missing_credentials
 from app.models.auth import Permission, Role, RolePermission
 from app.models.source import ConfigStatus, Source
 
@@ -37,7 +37,7 @@ ROLES = [
 
 
 def _status_for(required_env_vars: list[str]) -> str:
-    missing = [v for v in required_env_vars if not os.environ.get(v)]
+    missing = missing_credentials(required_env_vars)
     return ConfigStatus.AWAITING_CONFIGURATION.value if missing else ConfigStatus.READY.value
 
 
@@ -47,8 +47,13 @@ def default_sources() -> list[dict[str, Any]]:
             slug="osm_overpass_businesses", name="OpenStreetMap Overpass POI Directory", module_type="BUSINESS",
             source_category="open_map_api", base_url="https://overpass-api.de/api/interpreter",
             adapter_key="osm_overpass", requires_credentials=False, required_env_vars=[],
+            # Public API; its robots.txt targets crawlers. Fair-use policy: ~10k requests and
+            # ~1 GB per day, no bulk scraping. OSM data is ODbL: credit "(c) OpenStreetMap contributors".
+            respect_robots_txt=False,
             rate_limit_rpm=20, crawl_budget_pages=50,
             adapter_config={
+                "min_run_interval_minutes": 60,
+                "request_timeout_seconds": 90,  # Overpass queries can take tens of seconds
                 "default_countries": ["Nigeria", "Ghana", "Kenya"],
                 "default_cities": ["Lagos", "Abuja", "Ikeja", "Port Harcourt"],
                 "amenities": ["restaurant", "cafe", "fast_food", "pharmacy", "hospital", "bank"],
@@ -61,18 +66,25 @@ def default_sources() -> list[dict[str, Any]]:
             rate_limit_rpm=60, crawl_budget_pages=100, adapter_config={},
         ),
         dict(
-            slug="greenhouse_tech_boards", name="Greenhouse Public Job Boards (Nigeria & Remote Tech)",
+            slug="greenhouse_tech_boards", name="Greenhouse Public Job Boards (Remote & Africa Tech)",
             module_type="JOB", source_category="ats_api", base_url="https://boards-api.greenhouse.io/v1/boards",
             adapter_key="greenhouse_boards", requires_credentials=False, required_env_vars=[],
             rate_limit_rpm=30, crawl_budget_pages=200,
-            adapter_config={"board_tokens": ["paystack", "moniepoint", "andela", "wave", "gitlab", "cloudflare"]},
+            # Large boards (e.g. Cloudflare, ~8 MB with descriptions) need more than the 5 MB default cap
+            # and can take over 20 s to download on slower connections.
+            adapter_config={"board_tokens": ["moniepoint", "turing", "gitlab", "cloudflare", "twilio", "mongodb", "figma", "vercel", "elastic"], "max_response_mb": 25, "request_timeout_seconds": 90},
         ),
         dict(
             slug="remotive_tech_jobs", name="Remotive Remote Developer Jobs", module_type="JOB",
             source_category="job_board_api", base_url="https://remotive.com/api/remote-jobs",
             adapter_key="remotive_jobs", requires_credentials=False, required_env_vars=[],
-            rate_limit_rpm=20, crawl_budget_pages=50,
-            adapter_config={"categories": ["software-dev", "data", "devops", "qa"]},
+            # Public API whose robots.txt disallows /api/* for crawlers. Use is governed by its API
+            # terms (remotive.com/api-documentation): max ~4 calls/day, credit Remotive and link
+            # back to each job, don't resubmit jobs to other job sites, and don't gate the
+            # listings behind a public signup. Hence robots off, 1 req/min, >= 6 h between runs.
+            respect_robots_txt=False,
+            rate_limit_rpm=1, crawl_budget_pages=1,
+            adapter_config={"min_run_interval_minutes": 360},
         ),
         dict(
             slug="devpost_hackathons", name="Devpost Developer Hackathons & Grants", module_type="EVENT",
@@ -82,7 +94,7 @@ def default_sources() -> list[dict[str, Any]]:
         ),
         dict(
             slug="zindi_africa_competitions", name="Zindi Africa AI & Data Competitions", module_type="EVENT",
-            source_category="hackathon_platform", base_url="https://zindi.africa/api/v1/competitions",
+            source_category="hackathon_platform", base_url="https://api.zindi.world/v1/competitions",
             adapter_key="zindi_competitions", requires_credentials=False, required_env_vars=[],
             rate_limit_rpm=20, crawl_budget_pages=50, adapter_config={},
         ),
@@ -95,13 +107,13 @@ def default_sources() -> list[dict[str, Any]]:
         ),
         dict(
             slug="mlh_events", name="Major League Hacking (MLH) Global Hackathons", module_type="EVENT",
-            source_category="hackathon_platform", base_url="https://mlh.io/api/v2/events",
-            adapter_key="mlh_events", requires_credentials=False, required_env_vars=[],
+            source_category="hackathon_platform", base_url="https://www.mlh.com/seasons",
+            adapter_key="mlh_events", collection_method="STRUCTURED_DATA", requires_credentials=False, required_env_vars=[],
             rate_limit_rpm=20, crawl_budget_pages=50, adapter_config={},
         ),
     ]
     for s in sources:
-        s["collection_method"] = "OFFICIAL_API"
+        s.setdefault("collection_method", "OFFICIAL_API")
         s["config_status"] = _status_for(s["required_env_vars"])
     return sources
 

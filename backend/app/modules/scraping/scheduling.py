@@ -20,6 +20,7 @@ from app.models.source import ConfigStatus, RunStatus, Source, SourceRun
 from app.modules.scraping.runs import (
     QueueUnavailableError,
     RunAlreadyActiveError,
+    RunTooSoonError,
     create_and_dispatch_run,
 )
 
@@ -78,6 +79,8 @@ async def dispatch_due_sources(
                 logger.info("Scheduled run %s started for %s (%s)", run.id, source.slug, source.schedule_cron)
             except RunAlreadyActiveError:
                 logger.info("Skipping scheduled run for %s: a run is already active.", source.slug)
+            except RunTooSoonError as exc:
+                logger.info("Skipping scheduled run for %s: %s", source.slug, exc)
             except QueueUnavailableError:
                 logger.error("Queue unavailable; scheduled run for %s marked failed.", source.slug)
 

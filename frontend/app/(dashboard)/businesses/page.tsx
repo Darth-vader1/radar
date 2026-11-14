@@ -23,7 +23,9 @@ import {
   Flame,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { SaveButton } from "@/components/save-button";
 import { useLatest } from "@/lib/use-latest";
+import { isOsmRecord, OSM_COPYRIGHT_URL } from "@/lib/attribution";
 import { formatDate } from "@/lib/utils";
 
 interface BusinessItem {
@@ -72,7 +74,6 @@ export default function BusinessesPage() {
 
   // Filters
   const [city, setCity] = useState("Ikeja");
-  const [state, setState] = useState("Lagos");
   const [category, setCategory] = useState("");
   const [websiteStatus, setWebsiteStatus] = useState("");
   const [minLeadScore, setMinLeadScore] = useState<number>(0);
@@ -87,7 +88,6 @@ export default function BusinessesPage() {
     setLoading(true);
     const queryParts = [];
     if (city) queryParts.push(`city=${encodeURIComponent(city)}`);
-    if (state) queryParts.push(`state=${encodeURIComponent(state)}`);
     if (category) queryParts.push(`category=${encodeURIComponent(category)}`);
     if (websiteStatus) queryParts.push(`website_status=${encodeURIComponent(websiteStatus)}`);
     if (minLeadScore > 0) queryParts.push(`min_lead_score=${minLeadScore}`);
@@ -390,6 +390,15 @@ export default function BusinessesPage() {
             </tbody>
           </table>
         </div>
+        {businesses.some(isOsmRecord) && (
+          <div className="border-t border-border/60 px-5 py-2 text-[10px] text-muted-foreground">
+            Business data includes information ©{" "}
+            <a href={OSM_COPYRIGHT_URL} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+              OpenStreetMap contributors
+            </a>
+            , available under the Open Database License.
+          </div>
+        )}
       </div>
 
       {/* Slide-over Detail Drawer */}
@@ -405,12 +414,15 @@ export default function BusinessesPage() {
                 {selectedBiz.category || "Commercial"} · {selectedBiz.city}, {selectedBiz.country}
               </p>
             </div>
-            <button
-              onClick={() => setSelectedBiz(null)}
-              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <SaveButton entityType="BUSINESS" entityId={selectedBiz.id} />
+              <button
+                onClick={() => setSelectedBiz(null)}
+                className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto py-5 space-y-6 text-xs">
@@ -528,6 +540,15 @@ export default function BusinessesPage() {
                   {selectedBiz.original_source_url}
                 </a>
               </div>
+              {isOsmRecord(selectedBiz) && (
+                <div className="text-[10px] text-muted-foreground">
+                  Data ©{" "}
+                  <a href={OSM_COPYRIGHT_URL} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    OpenStreetMap contributors
+                  </a>{" "}
+                  (ODbL)
+                </div>
+              )}
             </div>
           </div>
         </div>

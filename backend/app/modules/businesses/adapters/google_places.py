@@ -1,9 +1,9 @@
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Tuple
 
+from app.core.config import get_credential
 from app.modules.businesses.adapters.osm_overpass import NormalizedBusiness
 from app.modules.scraping.adapter_base import (
     CollectionMethod,
@@ -30,7 +30,7 @@ class GooglePlacesAdapter(SourceAdapter[NormalizedBusiness]):
     required_env_vars = ("GOOGLE_PLACES_API_KEY",)
 
     async def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
-        api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+        api_key = get_credential("GOOGLE_PLACES_API_KEY")
         if not api_key:
             logger.warning("Google Places API key is missing. Skipping discovery seed.")
             return

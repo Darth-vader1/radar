@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Tuple
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,6 +31,13 @@ def normalize_title(title: str) -> str:
     t = re.sub(r"[\(\[\{].*?[\)\]\}]", "", t)
     t = re.sub(r"[^\w\s]", "", t.lower())
     return " ".join(t.split())
+
+
+def normalize_location(location: str | None) -> str:
+    """'Austin, TX | Remote' -> 'austin tx remote' (case, punctuation and spacing ignored)."""
+    if not location:
+        return ""
+    return " ".join(re.sub(r"[^\w\s]", " ", location.lower()).split())
 
 
 def normalize_company(company: str) -> str:
@@ -78,17 +85,32 @@ class JobIngestionService:
         except Exception:
             pass
 
-        # Serialize concurrent ingestion of the same vacancy (see advisory_xact_lock).
-        await advisory_xact_lock(db, f"job:{norm_company}:{norm_title}")
+        norm_location = normalize_location(raw_data.get("location_text"))
 
-        # 1. Deterministic Cross-Platform Duplicate Detection
+        # Serialize concurrent ingestion of the same vacancy (see advisory_xact_lock).
+        await advisory_xact_lock(db, f"job:{norm_company}:{norm_title}:{norm_location}", f"job-url:{apply_url}")
+
+        # 1. Duplicate detection. A job is the same vacancy when it has the same application
+        # URL (one posting listed on several boards), or -- coming from a *different* source --
+        # the same company, title AND location (a cross-post). Within one source, distinct
+        # postings are already distinct records: employers routinely list one title many times
+        # (e.g. 9 separate "Business Development Representative" roles, all "Hybrid").
+        location_expr = func.lower(func.regexp_replace(func.coalesce(Job.location_text, ""), r"[^\w\s]+", " ", "g"))
         stmt = (
             select(Job)
             .where(
-                Job.normalized_company == norm_company,
-                Job.normalized_title == norm_title,
+                or_(
+                    Job.application_url == apply_url,
+                    and_(
+                        Job.normalized_company == norm_company,
+                        Job.normalized_title == norm_title,
+                        func.regexp_replace(func.trim(location_expr), r"\s+", " ", "g") == norm_location,
+                        *([or_(Job.primary_source_id.is_(None), Job.primary_source_id != source_id)] if source_id else []),
+                    ),
+                )
             )
             .options(selectinload(Job.skills))
+            .limit(1)
         )
         existing = await db.scalar(stmt)
 

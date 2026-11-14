@@ -45,21 +45,39 @@ class OpenStreetMapOverpassAdapter(SourceAdapter[NormalizedBusiness]):
     required_env_vars = ()
 
     # Default bounding boxes / area queries for Nigerian commercial hubs
-    DEFAULT_AREAS = [
-        {"city": "Ikeja", "state": "Lagos", "bbox": "6.5700,3.3300,6.6200,3.3700"},
-        {"city": "Lagos Island / Victoria Island", "state": "Lagos", "bbox": "6.4100,3.3900,6.4600,3.4600"},
-        {"city": "Abuja Central", "state": "Federal Capital Territory", "bbox": "9.0300,7.4600,9.0900,7.5200"},
+    DEFAULT_AREAS: list[dict[str, Any]] = [
+        # "city" is stored on each business and must match the Businesses page's city filter.
+        # bbox is south,west,north,east (Overpass order).
+        {"city": "Ikeja", "state": "Lagos", "bbox": "6.5700,3.3300,6.6200,3.3700", "aliases": []},
+        {"city": "Lagos", "state": "Lagos", "bbox": "6.4100,3.3900,6.4600,3.4600",
+         "aliases": ["lagos island", "victoria island", "lekki"]},
+        {"city": "Abuja", "state": "Federal Capital Territory", "bbox": "9.0300,7.4600,9.0900,7.5200",
+         "aliases": ["abuja central", "fct"]},
+        {"city": "Port Harcourt", "state": "Rivers", "bbox": "4.7700,6.9600,4.8700,7.0600", "aliases": ["ph"]},
+        {"city": "Ibadan", "state": "Oyo", "bbox": "7.3400,3.8400,7.4400,3.9600", "aliases": []},
     ]
+
+    @classmethod
+    def match_area(cls, city_param: str) -> dict[str, Any]:
+        """
+        Maps a requested city ("Abuja", "Lagos", "Ikeja") to a known area. Matches in both
+        directions so "Abuja" finds "Abuja Central"; unknown cities fall back to Ikeja.
+        """
+        wanted = (city_param or "").strip().lower()
+        if wanted:
+            for area in cls.DEFAULT_AREAS:
+                names = [area["city"].lower(), *area.get("aliases", [])]
+                if any(wanted == n or wanted in n or n in wanted for n in names):
+                    return area
+            logger.warning("No predefined OSM area for city %r; using Ikeja.", city_param)
+        return cls.DEFAULT_AREAS[0]
 
     async def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
         city_param = query_params.get("city", "Ikeja")
 
         # Overpass QL query: extract amenities, shops, and offices in target area
-        bbox = "6.5700,3.3300,6.6200,3.3700"  # Default Ikeja
-        for area in self.DEFAULT_AREAS:
-            if area["city"].lower() in city_param.lower():
-                bbox = area["bbox"]
-                break
+        area = self.match_area(city_param)
+        bbox = area["bbox"]
 
         overpass_ql = f"""
         [out:json][timeout:25];
@@ -78,7 +96,7 @@ class OpenStreetMapOverpassAdapter(SourceAdapter[NormalizedBusiness]):
             method="POST",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             body=f"data={overpass_ql.strip()}",
-            cursor_metadata={"city": city_param, "country": "Nigeria"},
+            cursor_metadata={"city": area["city"], "state": area["state"], "country": "Nigeria"},
         )
 
     async def extract(self, artifact: RawFetchArtifact) -> Tuple[list[ExtractedItem], list[DiscoverySeed]]:
@@ -136,7 +154,7 @@ class OpenStreetMapOverpassAdapter(SourceAdapter[NormalizedBusiness]):
         # Address resolution
         street = tags.get("addr:street") or tags.get("addr:housename") or ""
         city = tags.get("addr:city") or meta.get("city", "Lagos")
-        state = tags.get("addr:state") or meta.get("state", "Lagos")
+        state = tags.get("addr:state") or meta.get("state")  # from the crawled area, never guessed
         country = tags.get("addr:country") or meta.get("country", "Nigeria")
 
         address_parts = [p for p in [tags.get("addr:housenumber"), street, city, state] if p]

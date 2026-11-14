@@ -29,11 +29,12 @@ class RemotiveJobsAdapter(SourceAdapter[NormalizedJob]):
     required_env_vars = ()
 
     async def discover(self, query_params: dict[str, Any]) -> AsyncIterator[DiscoverySeed]:
-        category = query_params.get("category", "software-dev")
-        yield DiscoverySeed(
-            url=f"https://remotive.com/api/remote-jobs?category={category}&limit=50",
-            method="GET",
-        )
+        # Remotive's terms allow at most ~4 API calls per day (and block >2/minute), and the
+        # free feed is small (a 24h-delayed sample) -- so exactly ONE request per run, covering
+        # all categories. Pass a category only if explicitly configured.
+        category = query_params.get("category") or self.source_config.get("category")
+        url = "https://remotive.com/api/remote-jobs"
+        yield DiscoverySeed(url=f"{url}?category={category}" if category else url, method="GET")
 
     async def extract(self, artifact: RawFetchArtifact) -> Tuple[list[ExtractedItem], list[DiscoverySeed]]:
         if artifact.status_code != 200:

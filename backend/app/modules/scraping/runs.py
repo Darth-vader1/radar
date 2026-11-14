@@ -11,10 +11,10 @@ retries and the cron scheduler so they all follow the same rules:
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,47 @@ class RunAlreadyActiveError(Exception):
 
 class QueueUnavailableError(Exception):
     """The Celery broker could not accept the task."""
+
+
+class RunTooSoonError(Exception):
+    """The source's terms limit how often it may be called (adapter_config.min_run_interval_minutes)."""
+
+    def __init__(self, source: Source, retry_after_seconds: int):
+        self.source = source
+        self.retry_after_seconds = retry_after_seconds
+        minutes = max(1, round(retry_after_seconds / 60))
+        super().__init__(
+            f"Source '{source.slug}' may only run every {min_run_interval_minutes(source)} minutes "
+            f"(provider usage terms). Try again in about {minutes} minute(s)."
+        )
+
+
+def min_run_interval_minutes(source: Source) -> int:
+    try:
+        return max(0, int((source.adapter_config or {}).get("min_run_interval_minutes") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def check_run_interval(db: AsyncSession, source: Source, now: Optional[datetime] = None) -> None:
+    """
+    Raises RunTooSoonError if this source ran too recently. Counts every run that actually
+    reached the provider (anything but runs that failed before starting, e.g. queue down).
+    """
+    interval = min_run_interval_minutes(source)
+    if not interval:
+        return
+    now = now or datetime.now(timezone.utc)
+    last = await db.scalar(
+        select(func.max(func.coalesce(SourceRun.started_at, SourceRun.created_at))).where(
+            SourceRun.source_id == source.id,
+            or_(SourceRun.started_at.is_not(None), SourceRun.status.in_(ACTIVE_STATUSES)),
+        )
+    )
+    if last is not None:
+        wait = (last + timedelta(minutes=interval) - now).total_seconds()
+        if wait > 0:
+            raise RunTooSoonError(source, int(wait) + 1)
 
 
 async def find_active_run(db: AsyncSession, source_id: uuid.UUID) -> Optional[SourceRun]:
@@ -68,6 +109,7 @@ async def create_and_dispatch_run(
     existing = await find_active_run(db, source.id)
     if existing is not None:
         raise RunAlreadyActiveError(source, existing.id)
+    await check_run_interval(db, source)
 
     run = SourceRun(
         id=uuid.uuid4(),

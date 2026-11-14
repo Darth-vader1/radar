@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 
+from app.core.config import settings
 from app.core.logging import bind_context, log_context
 from app.database.session import AsyncSessionLocal
 from app.models.source import (
@@ -41,6 +42,23 @@ ACTIVE_RUN_STATUSES = (RunStatus.QUEUED.value, RunStatus.RUNNING.value)
 RETRY_SEEDS_KEY = "__retry_seeds"
 
 _SENSITIVE_HEADER_HINTS = ("authorization", "cookie", "key", "token", "secret", "password", "signature")
+
+
+def _max_response_bytes(adapter_config: Optional[dict[str, Any]]) -> Optional[int]:
+    """Optional per-source size cap from adapter_config['max_response_mb'] (e.g. large job boards)."""
+    value = (adapter_config or {}).get("max_response_mb")
+    try:
+        return int(float(value) * 1024 * 1024) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _request_timeout(adapter_config: Optional[dict[str, Any]]) -> float:
+    """Per-source request timeout from adapter_config['request_timeout_seconds'] (slow, large APIs)."""
+    try:
+        return min(float((adapter_config or {}).get("request_timeout_seconds") or settings.DEFAULT_REQUEST_TIMEOUT), 300.0)
+    except (TypeError, ValueError):
+        return settings.DEFAULT_REQUEST_TIMEOUT
 
 
 def seed_to_snapshot(seed: DiscoverySeed) -> dict[str, Any]:
@@ -142,6 +160,8 @@ class PipelineOrchestrator:
                 max_concurrency=source.max_concurrency,
                 respect_robots_txt=source.respect_robots_txt,
                 crawl_budget_pages=source.crawl_budget_pages,
+                max_response_bytes=_max_response_bytes(source.adapter_config),
+                request_timeout_seconds=_request_timeout(source.adapter_config),
             )
             adapter = adapter_cls(source_config=source.adapter_config, rate_policy=rate_policy)
 
@@ -438,14 +458,35 @@ class PipelineOrchestrator:
                     )
                 )
 
-            if existing_rec is not None and existing_rec.canonical_entity_id is not None:
-                # Already stored as a canonical entity: just record the fresh sighting.
-                existing_rec.raw_payload = item.raw_data
+            if (
+                existing_rec is not None
+                and existing_rec.canonical_entity_id is not None
+                and existing_rec.content_hash == content_hash
+            ):
+                # Already stored and unchanged at the source: just record the fresh sighting.
                 existing_rec.source_run_id = source_run_id
                 await session.commit()
                 return "DEDUPLICATED"
 
-            if existing_rec is not None:
+            if existing_rec is not None and existing_rec.canonical_entity_id is not None:
+                # Stored before, but the source's data changed (new deadline, prize, status...):
+                # re-ingest so the canonical record is updated instead of going stale.
+                existing_rec.raw_payload = item.raw_data
+                existing_rec.source_run_id = source_run_id
+                existing_rec.processing_status = proc_status
+                existing_rec.validation_errors = val_errors
+                hash_taken = await session.scalar(
+                    select(ExtractedRecord.id).where(
+                        ExtractedRecord.source_id == source.id,
+                        ExtractedRecord.content_hash == content_hash,
+                        ExtractedRecord.id != existing_rec.id,
+                    )
+                )
+                if hash_taken is None:
+                    existing_rec.content_hash = content_hash
+                extracted_record_id = existing_rec.id
+                await session.commit()
+            elif existing_rec is not None:
                 # Seen before but never stored (validation or store failure): try again,
                 # which is what makes re-runs and dead-letter retries able to recover it.
                 existing_rec.raw_payload = item.raw_data

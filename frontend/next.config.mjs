@@ -31,6 +31,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Lets a second dev server (e.g. one pointed at a test database) build into its own folder
+  // instead of fighting the main one over .next.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   poweredByHeader: false,
   // Self-contained server bundle for the production Docker image.
   output: "standalone",

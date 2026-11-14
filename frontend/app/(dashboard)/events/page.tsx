@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Calendar,
   Search,
@@ -23,6 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { SaveButton } from "@/components/save-button";
 import { useLatest } from "@/lib/use-latest";
 import { formatDate } from "@/lib/utils";
 
@@ -72,6 +73,26 @@ interface EventStats {
   closing_soon_count: number;
   total_cash_prize_usd: number;
   student_eligible_count: number;
+  by_reach?: Record<string, number>;
+}
+
+type Reach = "nigeria" | "in_nigeria" | "all";
+
+const REACH_OPTIONS: { value: Reach; label: string; hint: string }[] = [
+  { value: "nigeria", label: "Open to Nigeria", hint: "Online, hybrid, or held in Africa" },
+  { value: "in_nigeria", label: "In Nigeria", hint: "Held in person in Nigeria" },
+  { value: "all", label: "Everywhere", hint: "Includes in-person events abroad" },
+];
+const REACH_STORAGE_KEY = "radar_events_reach";
+
+function initialReach(): Reach {
+  try {
+    const saved = localStorage.getItem(REACH_STORAGE_KEY);
+    if (saved === "nigeria" || saved === "in_nigeria" || saved === "all") return saved;
+  } catch {
+    // storage unavailable (private mode, blocked site data): fall back to the default
+  }
+  return "nigeria";
 }
 
 const CATEGORY_TABS = [
@@ -94,15 +115,18 @@ export default function EventsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   // Filters
+  const [reach, setReach] = useState<Reach>("nigeria");
   const [category, setCategory] = useState("");
   const [deliveryMode, setDeliveryMode] = useState("");
   const [hasCashOnly, setHasCashOnly] = useState(false);
   const [studentOnly, setStudentOnly] = useState(false);
   const [search, setSearch] = useState("");
 
+  const requestSeq = useRef(0);
   const loadData = async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
-    const queryParts = [];
+    const queryParts = [`reach=${reach}`];
     if (category) queryParts.push(`category=${encodeURIComponent(category)}`);
     if (deliveryMode) queryParts.push(`delivery_mode=${encodeURIComponent(deliveryMode)}`);
     if (hasCashOnly) queryParts.push("has_cash_prizes=true");
@@ -113,8 +137,9 @@ export default function EventsPage() {
 
     const [eventsRes, statsRes] = await Promise.all([
       fetchApi<EventItem[]>(`/events${queryStr}`),
-      fetchApi<EventStats>("/events/stats"),
+      fetchApi<EventStats>(`/events/stats?reach=${reach}`),
     ]);
+    if (seq !== requestSeq.current) return; // a newer filter change superseded this request
 
     if (eventsRes.data) {
       setEvents(eventsRes.data);
@@ -127,9 +152,22 @@ export default function EventsPage() {
 
   // Dropdown filters re-fetch immediately; text search re-fetches on Enter/submit.
   const loadDataRef = useLatest(loadData);
+  // Restore the saved reach after mount (localStorage is not available during server rendering).
+  useEffect(() => {
+    setReach(initialReach());
+  }, []);
   useEffect(() => {
     loadDataRef.current();
-  }, [category, deliveryMode, hasCashOnly, studentOnly, loadDataRef]);
+  }, [reach, category, deliveryMode, hasCashOnly, studentOnly, loadDataRef]);
+
+  const chooseReach = (value: Reach) => {
+    setReach(value);
+    try {
+      localStorage.setItem(REACH_STORAGE_KEY, value);
+    } catch {
+      // not persisted; the choice still applies for this visit
+    }
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -213,6 +251,33 @@ export default function EventsPage() {
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh Pipeline
         </button>
+      </div>
+
+      {/* Reach: Nigeria-first by default */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex w-full rounded-lg border border-border bg-card/60 p-0.5 text-xs sm:w-auto" role="group" aria-label="Where you can take part">
+          {REACH_OPTIONS.map((opt) => {
+            const count = stats?.by_reach?.[opt.value];
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                title={opt.hint}
+                aria-pressed={reach === opt.value}
+                onClick={() => chooseReach(opt.value)}
+                className={`flex-1 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition sm:flex-none ${
+                  reach === opt.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+                {count != null && <span className="ml-1.5 tabular-nums opacity-80">{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {REACH_OPTIONS.find((o) => o.value === reach)?.hint}. Counts are active events.
+        </p>
       </div>
 
       {/* KPI Stats Bar */}
@@ -348,10 +413,22 @@ export default function EventsPage() {
       ) : events.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
           <Calendar className="h-10 w-10 text-muted-foreground/40" />
-          <h3 className="mt-3 text-sm font-semibold">No hackathons or events found</h3>
-          <p className="mt-1 text-xs text-muted-foreground max-w-sm">
-            Try adjusting your search criteria, clearing the cash filter, or triggering an EventRadar discovery run from the Sources console.
-          </p>
+          {reach === "in_nigeria" && !category && !deliveryMode && !hasCashOnly && !studentOnly && !search ? (
+            <>
+              <h3 className="mt-3 text-sm font-semibold">No in-person events in Nigeria yet</h3>
+              <p className="mt-1 text-xs text-muted-foreground max-w-sm">
+                None of the current sources list events held in Nigeria. Online events you can join from Nigeria are
+                under <button type="button" onClick={() => chooseReach("nigeria")} className="text-primary hover:underline">Open to Nigeria</button>.
+              </p>
+            </>
+          ) : (
+            <>
+              <h3 className="mt-3 text-sm font-semibold">No hackathons or events found</h3>
+              <p className="mt-1 text-xs text-muted-foreground max-w-sm">
+                Try adjusting your search criteria, clearing the cash filter, or triggering an EventRadar discovery run from the Sources console.
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -461,12 +538,15 @@ export default function EventsPage() {
                   Organized by: <span className="text-foreground">{selectedEvent.organizer || "Independent Host"}</span>
                 </p>
               </div>
-              <button
-                onClick={() => setSelectedEvent(null)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <SaveButton entityType="EVENT" entityId={selectedEvent.id} />
+                <button
+                  onClick={() => setSelectedEvent(null)}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             {/* Drawer Body */}

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.models.auth import User
 from app.models.event import Event, EventCategory, EventCategoryLink, EventStatus
+from app.modules.events.services.region import REACH_VALUES, reach_clause
 from app.schemas.event import (
     EventCategoryRead,
     EventDrawerDetail,
@@ -33,6 +34,11 @@ async def list_events(
     is_free: Optional[bool] = Query(None),
     category: Optional[str] = Query(None, description="Category slug"),
     country: Optional[str] = Query(None),
+    reach: Optional[str] = Query(
+        None,
+        pattern="^(nigeria|in_nigeria|all)$",
+        description="nigeria: online, hybrid or held in Africa; in_nigeria: held in Nigeria; all: no filter",
+    ),
     deadline_before: Optional[datetime] = Query(None),
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -65,6 +71,9 @@ async def list_events(
         stmt = stmt.where(Event.is_free_participation == is_free)
     if country:
         stmt = stmt.where(func.lower(Event.country) == country.lower())
+    reach_filter = reach_clause(reach)
+    if reach_filter is not None:
+        stmt = stmt.where(reach_filter)
     if deadline_before:
         stmt = stmt.where(Event.registration_deadline <= deadline_before)
     if category:
@@ -99,16 +108,23 @@ async def list_event_categories(
 
 @router.get("/stats", response_model=EventStatsResponse)
 async def get_event_stats(
+    reach: Optional[str] = Query(
+        None,
+        pattern="^(nigeria|in_nigeria|all)$",
+        description="nigeria: online, hybrid or held in Africa; in_nigeria: held in Nigeria; all: no filter",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Aggregate counters for the EventRadar dashboard (active events only)."""
+    """Aggregate counters for the EventRadar dashboard (active events only), optionally limited by reach."""
     now = datetime.now(timezone.utc)
-    active = Event.status.not_in(INACTIVE_STATUSES)
+    active_status = Event.status.not_in(INACTIVE_STATUSES)
+    reach_filter = reach_clause(reach)
+    active = active_status if reach_filter is None else (active_status & reach_filter)
 
     total_active = await db.scalar(select(func.count(Event.id)).where(active)) or 0
     open_count = await db.scalar(
-        select(func.count(Event.id)).where(Event.status == EventStatus.OPEN_REGISTRATION.value)
+        select(func.count(Event.id)).where(active, Event.status == EventStatus.OPEN_REGISTRATION.value)
     ) or 0
     closing_soon = await db.scalar(
         select(func.count(Event.id)).where(
@@ -136,6 +152,12 @@ async def get_event_stats(
         select(Event.delivery_mode, func.count(Event.id)).where(active).group_by(Event.delivery_mode)
     )
 
+    by_reach = {}
+    for value in REACH_VALUES:
+        clause = reach_clause(value)
+        where = (active_status,) if clause is None else (active_status, clause)
+        by_reach[value] = await db.scalar(select(func.count(Event.id)).where(*where)) or 0
+
     return EventStatsResponse(
         total_active_events=total_active,
         open_registration_count=open_count,
@@ -144,6 +166,7 @@ async def get_event_stats(
         student_eligible_count=student_count,
         by_category={slug: count for slug, count in category_rows.all()},
         by_delivery_mode={mode: count for mode, count in mode_rows.all()},
+        by_reach=by_reach,
     )
 
 

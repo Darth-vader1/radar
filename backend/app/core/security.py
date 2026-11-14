@@ -2,6 +2,7 @@ import hashlib
 import ipaddress
 import secrets
 import socket
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from urllib.parse import urlparse
@@ -15,6 +16,10 @@ from app.core.config import settings
 class SSRFValidationError(Exception):
     """Raised when an outbound URL violates SSRF security boundaries."""
     pass
+
+
+class HostResolutionError(SSRFValidationError):
+    """The host name could not be resolved (usually transient: DNS hiccup, network blip)."""
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -172,6 +177,48 @@ def check_resolved_ip(hostname: str, ip_str: str) -> None:
             )
 
 
+# --- Short-lived DNS cache --------------------------------------------------------------
+# Every outbound request resolves its host twice (pre-flight check here, then the pinned
+# connection in app.core.http), and enrichment makes several requests per site. On slow
+# resolvers (seconds per lookup) that dominates crawl time. Answers are cached briefly; this
+# stays SSRF-safe because every cached address is re-validated on each use and connections
+# are pinned to exactly the address that was validated.
+DNS_CACHE_TTL_SECONDS = 60.0
+_DNS_CACHE_MAX = 2048
+_dns_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
+
+
+def _dns_cache_get(host: str, port: int) -> Optional[list[str]]:
+    hit = _dns_cache.get((host.lower(), port))
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    return None
+
+
+def _dns_cache_put(host: str, port: int, addresses: list[str]) -> None:
+    if len(_dns_cache) >= _DNS_CACHE_MAX:
+        _dns_cache.clear()
+    _dns_cache[(host.lower(), port)] = (time.monotonic() + DNS_CACHE_TTL_SECONDS, addresses)
+
+
+def clear_dns_cache() -> None:
+    _dns_cache.clear()
+
+
+def resolve_host(hostname: str, port: int) -> list[str]:
+    """Resolves (with the short-lived cache) to a de-duplicated list of IP strings."""
+    cached = _dns_cache_get(hostname, port)
+    if cached is not None:
+        return cached
+    try:
+        infos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        raise HostResolutionError(f"Could not resolve host '{hostname}': {e}")
+    addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
+    _dns_cache_put(hostname, port, addresses)
+    return addresses
+
+
 def validate_outbound_url(url: str, allowed_ports: Optional[List[int]] = None) -> str:
     """
     Strictly validates that an outbound URL does not resolve to private,
@@ -187,12 +234,7 @@ def validate_outbound_url(url: str, allowed_ports: Optional[List[int]] = None) -
     _, hostname, port = validate_url_shape(url, allowed_ports)
 
     # DNS resolution and IP range validation
-    try:
-        addr_infos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as e:
-        raise SSRFValidationError(f"Could not resolve host '{hostname}': {e}")
-
-    for *_, sockaddr in addr_infos:
-        check_resolved_ip(hostname, str(sockaddr[0]))
+    for ip in resolve_host(hostname, port):
+        check_resolved_ip(hostname, ip)
 
     return url

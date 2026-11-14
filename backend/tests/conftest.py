@@ -15,3 +15,13 @@ def setup_test_environment(monkeypatch):
     monkeypatch.setattr(settings, "ENVIRONMENT", "test")
     monkeypatch.setattr(settings, "DEBUG", True)
     monkeypatch.setattr(settings, "ENFORCE_SSRF_PROTECTION", True)
+
+
+@pytest.fixture(autouse=True)
+def fresh_dns_cache():
+    """Each test resolves hosts from scratch (the app caches DNS answers for 60 s)."""
+    from app.core.security import clear_dns_cache
+
+    clear_dns_cache()
+    yield
+    clear_dns_cache()

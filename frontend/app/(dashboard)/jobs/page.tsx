@@ -19,7 +19,9 @@ import {
   Building,
 } from "lucide-react";
 import { fetchApi } from "@/lib/api-client";
+import { SaveButton } from "@/components/save-button";
 import { useLatest } from "@/lib/use-latest";
+import { isRemotiveJob } from "@/lib/attribution";
 import { formatDate } from "@/lib/utils";
 
 interface JobSkillItem {
@@ -312,6 +314,14 @@ export default function JobsPage() {
                     </span>
                   )}
                 </div>
+                {isRemotiveJob(job) && (
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    Listing via{" "}
+                    <a href={job.application_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="font-medium text-primary hover:underline">
+                      Remotive
+                    </a>
+                  </div>
+                )}
 
                 <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <MapPin className="h-3 w-3 shrink-0" />
@@ -372,6 +382,14 @@ export default function JobsPage() {
                     <td className="px-5 py-3.5">
                       <div className="font-semibold text-foreground">{j.title}</div>
                       <div className="text-[11px] text-muted-foreground">{j.company_name}</div>
+                      {isRemotiveJob(j) && (
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    Listing via{" "}
+                    <a href={j.application_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="font-medium text-primary hover:underline">
+                      Remotive
+                    </a>
+                  </div>
+                )}
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-semibold text-foreground">
@@ -420,12 +438,15 @@ export default function JobsPage() {
                 <span>{selectedJob.location_text || "Remote"}</span>
               </div>
             </div>
-            <button
-              onClick={() => setSelectedJob(null)}
-              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <SaveButton entityType="JOB" entityId={selectedJob.id} />
+              <button
+                onClick={() => setSelectedJob(null)}
+                className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto py-5 space-y-6 text-xs">
@@ -485,6 +506,14 @@ export default function JobsPage() {
                 <span>Source Platform:</span>
                 <span className="font-medium text-foreground">{selectedJob.source_platform}</span>
               </div>
+              {isRemotiveJob(selectedJob) && (
+                <div className="flex justify-between">
+                  <span>Listing provided by:</span>
+                  <a href={selectedJob.application_url} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+                    Remotive
+                  </a>
+                </div>
+              )}
               {selectedJob.other_sources_count > 0 && (
                 <div className="flex justify-between text-primary">
                   <span>Cross-Platform Dedup:</span>
@@ -502,7 +531,7 @@ export default function JobsPage() {
               rel="noreferrer"
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-xs font-bold text-primary-foreground shadow hover:bg-primary/90"
             >
-              <span>Apply on Company Site</span>
+              <span>{isRemotiveJob(selectedJob) ? "View & apply on Remotive" : "Apply on Company Site"}</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>

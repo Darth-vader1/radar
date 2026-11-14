@@ -6,6 +6,8 @@ from typing import Any, AsyncIterator, Generic, Optional, Tuple, TypeVar
 
 from pydantic import BaseModel
 
+from app.core.config import get_credential
+
 NormalizedT = TypeVar("NormalizedT", bound=BaseModel)
 
 
@@ -25,6 +27,8 @@ class RateLimitPolicy:
     respect_robots_txt: bool = True
     crawl_budget_pages: int = 100
     request_timeout_seconds: float = 20.0
+    # Per-source override of the response size cap (bytes); None = global MAX_RESPONSE_BYTES.
+    max_response_bytes: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -83,7 +87,7 @@ class SourceAdapter(ABC, Generic[NormalizedT]):
 
     def check_configuration(self, env: dict[str, str]) -> Tuple[bool, list[str]]:
         """Returns (is_configured, missing_env_vars)."""
-        missing = [k for k in self.required_env_vars if not env.get(k)]
+        missing = [k for k in self.required_env_vars if not (env.get(k) or get_credential(k))]
         return (len(missing) == 0, missing)
 
     @abstractmethod

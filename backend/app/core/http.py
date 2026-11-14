@@ -13,14 +13,13 @@ Use `safe_async_client()` instead of `httpx.AsyncClient()` for anything that fet
 URLs that come from the internet, adapters, or users.
 """
 import asyncio
-import socket
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 import httpx
 
 from app.core.config import settings
-from app.core.security import SSRFValidationError, check_resolved_ip, validate_url_shape
+from app.core.security import SSRFValidationError, check_resolved_ip, resolve_host, validate_url_shape
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
@@ -35,13 +34,9 @@ class ResponseTooLargeError(Exception):
 
 
 async def system_resolver(host: str, port: int) -> list[str]:
-    loop = asyncio.get_running_loop()
-    try:
-        infos = await loop.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
-        raise SSRFValidationError(f"Could not resolve host '{host}': {exc}") from exc
-    # Preserve resolver order, drop duplicates.
-    return list(dict.fromkeys(info[4][0] for info in infos))
+    # Shares the short-lived DNS cache with validate_outbound_url (see app.core.security);
+    # resolution runs in a thread so a slow resolver doesn't block the event loop.
+    return await asyncio.to_thread(resolve_host, host, port)
 
 
 class SSRFSafeTransport(httpx.AsyncBaseTransport):

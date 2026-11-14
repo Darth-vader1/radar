@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,7 +8,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.http import Resolver, ResponseTooLargeError, read_limited, safe_async_client
-from app.core.security import SSRFValidationError, validate_outbound_url
+from app.core.security import HostResolutionError, SSRFValidationError, validate_outbound_url
 from app.modules.scraping.adapter_base import DiscoverySeed, RateLimitPolicy, RawFetchArtifact
 from app.modules.scraping.politeness import RobotsPolicyService, TokenBucketRateLimiter
 
@@ -63,6 +64,15 @@ def _content_type_allowed(content_type: str) -> bool:
         return True  # many APIs omit it; the size cap still applies
     base = content_type.split(";", 1)[0].strip().lower()
     return base.startswith(ALLOWED_CONTENT_TYPE_PREFIXES) or base.endswith(("+json", "+xml"))
+
+
+# Network failures worth retrying (the request may well succeed a few seconds later).
+TRANSIENT_HTTP_ERRORS = (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
+
+# Absolute ceiling for any per-source max_response_bytes override.
+MAX_RESPONSE_BYTES_CEILING = 50 * 1024 * 1024
 
 
 class FetcherGateway:
@@ -162,11 +172,39 @@ class FetcherGateway:
                 )
 
         # 3. Execution dispatch
+        max_bytes = effective_policy.max_response_bytes if effective_policy is not None else None
+        timeout = effective_policy.request_timeout_seconds if effective_policy is not None else None
         if seed.requires_js:
             return await self.fetch_rendered(seed)
-        return await self.fetch_http(seed)
+        return await self.fetch_http(seed, max_bytes=max_bytes, timeout=timeout)
 
-    async def fetch_http(self, seed: DiscoverySeed) -> RawFetchArtifact:
+    async def fetch_http(
+        self,
+        seed: DiscoverySeed,
+        max_bytes: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> RawFetchArtifact:
+        """
+        Fetches with retries: timeouts, dropped connections and DNS failures are retried
+        (RETRY_ATTEMPTS in total, with backoff). Everything else -- SSRF blocks, oversized or
+        disallowed responses, HTTP error statuses -- is returned or raised immediately.
+        """
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            try:
+                return await self._fetch_http_once(seed, max_bytes, timeout)
+            except (FetchError, HostResolutionError) as exc:
+                transient = isinstance(exc, HostResolutionError) or isinstance(exc.__cause__, TRANSIENT_HTTP_ERRORS)
+                if not transient or attempt == RETRY_ATTEMPTS:
+                    raise
+                delay = RETRY_BACKOFF_SECONDS * attempt
+                logger.warning("Transient error fetching %s (attempt %d/%d), retrying in %.0fs: %s",
+                               seed.url, attempt, RETRY_ATTEMPTS, delay, exc)
+                await asyncio.sleep(delay)
+        raise AssertionError("unreachable")
+
+    async def _fetch_http_once(
+        self, seed: DiscoverySeed, max_bytes: Optional[int], timeout: Optional[float]
+    ) -> RawFetchArtifact:
         """
         SSRF-guarded HTTP request with hop-by-hop redirect verification.
         Every request (initial and each redirect hop) goes through SSRFSafeTransport, which
@@ -183,14 +221,18 @@ class FetcherGateway:
         }
 
         async with safe_async_client(
-            timeout=self.timeout,
+            timeout=timeout or self.timeout,
             follow_redirects=False,
             transport=self._transport,
             resolver=self._resolver,
         ) as client:
             hops = 0
             method = seed.method.upper()
-            params = seed.params
+            # httpx *replaces* a URL's query string with `params` (even an empty dict, which
+            # silently turned ".../list?page=2" into ".../list"), so merge them into the URL instead.
+            if seed.params:
+                current_url = str(httpx.URL(current_url).copy_merge_params(seed.params))
+            params = None
             body = seed.body
 
             while hops <= self.max_redirect_hops:
@@ -222,11 +264,13 @@ class FetcherGateway:
                                 f"Refusing to download content type '{content_type}' from {current_url}"
                             )
 
-                        limited = await read_limited(resp, self.max_response_bytes)
+                        limit = min(max_bytes or self.max_response_bytes, MAX_RESPONSE_BYTES_CEILING)
+                        limited = await read_limited(resp, limit)
                 except ResponseTooLargeError as exc:
                     raise FetchError(str(exc)) from exc
                 except httpx.RequestError as exc:
-                    raise FetchError(f"HTTP request error for {current_url}: {exc}") from exc
+                    # Some httpx errors (e.g. ReadTimeout) have an empty message; always name the type.
+                    raise FetchError(f"HTTP request error for {current_url}: {type(exc).__name__}: {exc}") from exc
 
                 return RawFetchArtifact(
                     seed=seed,

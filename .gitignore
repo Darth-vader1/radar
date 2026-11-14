@@ -51,6 +51,7 @@ yarn-error.log*
 # Node / Frontend
 node_modules/
 .next/
+.next-*/
 out/
 .pnp
 .pnp.js

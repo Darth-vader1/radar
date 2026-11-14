@@ -53,3 +53,36 @@ def test_allow_legitimate_public_url():
     url = "https://example.com"
     validated = validate_outbound_url(url)
     assert validated == url
+
+
+def test_dns_answers_are_cached_briefly(monkeypatch):
+    import socket
+
+    from app.core import security
+
+    calls = []
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        calls.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+
+    monkeypatch.setattr(security.socket, "getaddrinfo", fake_getaddrinfo)
+    validate_outbound_url("https://cached.example.com/a")
+    validate_outbound_url("https://cached.example.com/b")
+    assert calls == ["cached.example.com"]  # second lookup served from cache
+
+    monkeypatch.setattr(security.time, "monotonic", lambda: 10**9)  # far past the TTL
+    validate_outbound_url("https://cached.example.com/c")
+    assert calls == ["cached.example.com", "cached.example.com"]
+
+
+def test_cached_private_address_is_still_rejected_every_time(monkeypatch):
+    import socket
+
+    from app.core import security
+
+    monkeypatch.setattr(security.socket, "getaddrinfo",
+                        lambda host, port, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.7", port))])
+    for _ in range(2):  # first from DNS, second from the cache
+        with pytest.raises(SSRFValidationError, match="prohibited"):
+            validate_outbound_url("https://internal.example.com/")

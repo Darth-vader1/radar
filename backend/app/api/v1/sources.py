@@ -1,4 +1,3 @@
-import os
 import uuid
 from typing import List, Optional
 
@@ -7,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_roles
+from app.core.config import missing_credentials
 from app.models.auth import AuditLog, User
 from app.models.source import ConfigStatus, Source
 from app.schemas.source import (
@@ -32,8 +32,21 @@ async def list_sources(
     if is_enabled is not None:
         stmt = stmt.where(Source.is_enabled == is_enabled)
 
-    results = await db.scalars(stmt)
-    return list(results.all())
+    sources = list((await db.scalars(stmt)).all())
+    # Keep the credentials badge current: keys can be added to .env at any time.
+    changed = False
+    for source in sources:
+        status_now = (
+            ConfigStatus.AWAITING_CONFIGURATION.value
+            if missing_credentials(source.required_env_vars)
+            else ConfigStatus.READY.value
+        )
+        if source.required_env_vars and source.config_status != status_now:
+            source.config_status = status_now
+            changed = True
+    if changed:
+        await db.commit()
+    return sources
 
 
 @router.post("", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
@@ -48,7 +61,7 @@ async def create_source(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Source with slug '{payload.slug}' already exists.")
 
     # Determine configuration status based on required env vars
-    missing_vars = [var for var in payload.required_env_vars if not os.environ.get(var)]
+    missing_vars = missing_credentials(payload.required_env_vars)
     status_val = ConfigStatus.AWAITING_CONFIGURATION.value if missing_vars else ConfigStatus.READY.value
 
     new_source = Source(
@@ -160,7 +173,7 @@ async def check_source_config(
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found.")
 
-    missing = [var for var in source.required_env_vars if not os.environ.get(var)]
+    missing = missing_credentials(source.required_env_vars)
     is_ready = len(missing) == 0
 
     new_status = ConfigStatus.READY.value if is_ready else ConfigStatus.AWAITING_CONFIGURATION.value

@@ -123,6 +123,18 @@ class TestFetcherGateway:
         assert host_header == "example.com"
         assert sni == "example.com"
 
+    async def test_query_string_in_seed_url_is_sent(self, gateway, net):
+        """Regression: an empty params dict made httpx drop the URL's own query (?page=2, ?content=true)."""
+        net.routes["example.com/list"] = lambda request: html(str(request.url.query, "ascii"))
+
+        artifact = await gateway.fetch(DiscoverySeed(url="https://example.com/list?page=2&content=true"),
+                                       enforce_robots=False)
+        assert artifact.body_text == "page=2&content=true"
+
+        merged = await gateway.fetch(DiscoverySeed(url="https://example.com/list?page=2", params={"q": "x"}),
+                                     enforce_robots=False)
+        assert merged.body_text == "page=2&q=x"
+
     async def test_robots_disallowed_raises_exception(self, gateway):
         seed = DiscoverySeed(url="https://example.com/disallowed")
         gateway.robots_service.is_allowed = AsyncMock(return_value=False)
@@ -262,3 +274,94 @@ class TestFetcherGateway:
         await gateway.close()
         gateway.robots_service.close.assert_called_once()
         gateway.rate_limiter.close.assert_called_once()
+
+    async def test_per_source_size_override_allows_larger_responses(self, gateway, net):
+        net.routes["example.com/big-board"] = html("x" * 50_000)  # gateway default cap is 10_000 here
+        seed = DiscoverySeed(url="https://example.com/big-board")
+
+        with pytest.raises(FetchError, match="byte limit"):
+            await gateway.fetch(seed, enforce_robots=False, enforce_rate_limit=False)
+
+        artifact = await gateway.fetch(
+            seed, rate_policy=RateLimitPolicy(max_response_bytes=100_000), enforce_robots=False, enforce_rate_limit=False
+        )
+        assert len(artifact.body_text) == 50_000
+
+
+class TestFetchRetries:
+    """Transient network errors are retried; security blocks and HTTP errors are not."""
+
+    @pytest.fixture(autouse=True)
+    def no_backoff(self, monkeypatch):
+        monkeypatch.setattr(gateway_module, "RETRY_BACKOFF_SECONDS", 0)
+
+    def flaky(self, net, failures):
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] <= len(failures):
+                raise failures[calls["n"] - 1]
+            return html("finally")
+
+        net.routes["example.com/flaky"] = handler
+        return calls
+
+    async def test_timeout_then_success_is_retried(self, gateway, net):
+        calls = self.flaky(net, [httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")])
+        artifact = await gateway.fetch(DiscoverySeed(url="https://example.com/flaky"), enforce_robots=False, enforce_rate_limit=False)
+        assert artifact.body_text == "finally" and calls["n"] == 3
+
+    async def test_gives_up_after_retry_attempts_with_a_readable_error(self, gateway, net):
+        calls = self.flaky(net, [httpx.ConnectError("")] * 5)
+        with pytest.raises(FetchError, match="ConnectError"):
+            await gateway.fetch(DiscoverySeed(url="https://example.com/flaky"), enforce_robots=False, enforce_rate_limit=False)
+        assert calls["n"] == gateway_module.RETRY_ATTEMPTS
+
+    async def test_dns_failure_is_retried(self, gateway, net):
+        attempts = {"n": 0}
+        real_resolve = net.resolve
+
+        async def flaky_resolve(host, port):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                from app.core.security import HostResolutionError
+                raise HostResolutionError(f"Could not resolve host '{host}'")
+            return await real_resolve(host, port)
+
+        gateway._resolver = flaky_resolve
+        net.routes["example.com/dns"] = html("resolved")
+        artifact = await gateway.fetch(DiscoverySeed(url="https://example.com/dns"), enforce_robots=False, enforce_rate_limit=False)
+        assert artifact.body_text == "resolved" and attempts["n"] == 2
+
+    async def test_ssrf_block_is_not_retried(self, gateway, net):
+        net.dns["internal.example.com"] = ["10.0.0.5"]
+        with pytest.raises(SSRFValidationError):
+            await gateway.fetch(DiscoverySeed(url="https://internal.example.com/"), enforce_robots=False, enforce_rate_limit=False)
+        assert net.seen == []
+
+    async def test_http_error_status_is_returned_not_retried(self, gateway, net):
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            return httpx.Response(503, text="busy", headers={"content-type": "text/plain"})
+
+        net.routes["example.com/busy"] = handler
+        artifact = await gateway.fetch(DiscoverySeed(url="https://example.com/busy"), enforce_robots=False, enforce_rate_limit=False)
+        assert artifact.status_code == 503 and calls["n"] == 1
+
+    async def test_per_source_timeout_reaches_the_client(self, gateway, net, monkeypatch):
+        seen = {}
+        from app.modules.scraping import gateway as gw_mod
+        real = gw_mod.safe_async_client
+
+        def spy(**kwargs):
+            seen["timeout"] = kwargs.get("timeout")
+            return real(**kwargs)
+
+        monkeypatch.setattr(gw_mod, "safe_async_client", spy)
+        net.routes["example.com/slow"] = html("ok")
+        await gateway.fetch(DiscoverySeed(url="https://example.com/slow"),
+                            rate_policy=RateLimitPolicy(request_timeout_seconds=90), enforce_robots=False, enforce_rate_limit=False)
+        assert seen["timeout"] == 90

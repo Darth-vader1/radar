@@ -9,7 +9,7 @@ import {
   Calendar,
   Activity,
   Database,
-  BrainCircuit,
+  Lightbulb,
   BarChart3,
   Settings,
   Bookmark,
@@ -24,7 +24,7 @@ const navigation = [
   { name: "Saved Records", href: "/saved", icon: Bookmark },
   { name: "Discovery Tasks", href: "/tasks", icon: Radar },
   { name: "Data Sources", href: "/sources", icon: Database },
-  { name: "AI Intelligence", href: "/intelligence", icon: BrainCircuit },
+  { name: "Insights", href: "/insights", icon: Lightbulb },
   { name: "Analytics", href: "/analytics", icon: BarChart3 },
   { name: "Settings", href: "/settings", icon: Settings },
 ];

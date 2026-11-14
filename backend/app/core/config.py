@@ -1,3 +1,4 @@
+import os
 from typing import Annotated, List, Optional, Union
 
 from pydantic import field_validator, model_validator
@@ -166,3 +167,17 @@ _KNOWN_DEFAULT_SECRETS = {
 }
 
 settings = Settings()
+
+
+def get_credential(name: str) -> Optional[str]:
+    """
+    A source credential by env-var name: a real environment variable wins, otherwise the value
+    loaded from the .env files into settings. Adapters must use this rather than os.environ,
+    which never sees values that only live in .env.
+    """
+    value = os.environ.get(name) or getattr(settings, name, None)
+    return str(value) if value else None
+
+
+def missing_credentials(names: "List[str] | tuple[str, ...]") -> List[str]:
+    return [n for n in names if not get_credential(n)]

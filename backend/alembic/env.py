@@ -16,7 +16,10 @@ from app.models import Base
 # this is the Alembic Config object
 config = context.config
 
-if config.config_file_name is not None:
+# Configure logging from alembic.ini only for the `alembic` CLI. When migrations run inside
+# another process (tests, an app's startup), that process owns logging: alembic.ini's root
+# level (WARN) would otherwise silence the application's INFO logs.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata

@@ -1,10 +1,14 @@
 from fastapi import APIRouter
 
+from app.api.v1.admin import router as admin_router
+from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.businesses import router as businesses_router
 from app.api.v1.events import router as events_router
 from app.api.v1.health import router as health_router
+from app.api.v1.insights import router as insights_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.saved import router as saved_router
 from app.api.v1.sources import router as sources_router
 from app.api.v1.tasks import router as tasks_router
 
@@ -17,3 +21,7 @@ api_v1_router.include_router(tasks_router)
 api_v1_router.include_router(businesses_router)
 api_v1_router.include_router(jobs_router)
 api_v1_router.include_router(events_router)
+api_v1_router.include_router(saved_router)
+api_v1_router.include_router(insights_router)
+api_v1_router.include_router(analytics_router)
+api_v1_router.include_router(admin_router)
