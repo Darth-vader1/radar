@@ -2,7 +2,7 @@
 # Build context: repository root.
 
 # ---- build: install production dependencies into an isolated virtualenv ----
-FROM python:3.12-slim AS build
+FROM python:3.15-slim AS build
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
@@ -12,7 +12,7 @@ COPY backend/requirements.lock /tmp/requirements.lock
 RUN pip install --no-deps -r /tmp/requirements.lock
 
 # ---- runtime ----
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 # Set by the release workflow to the git tag; shown in Sentry events and radar_build_info.
 ARG APP_RELEASE=""
 ENV APP_RELEASE=$APP_RELEASE \
